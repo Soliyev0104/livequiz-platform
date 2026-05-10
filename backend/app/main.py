@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.core.config import Settings, get_settings
+from app.core.ids import get_id_generator
 
 log = logging.getLogger("app")
 
@@ -27,6 +28,7 @@ log = logging.getLogger("app")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    get_id_generator()  # fail-fast: raises if SNOWFLAKE_WORKER_ID is missing or out of range
     engine: AsyncEngine = create_async_engine(
         settings.database_url,
         pool_pre_ping=True,
