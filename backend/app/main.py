@@ -17,6 +17,9 @@ Surface area:
   POST   /api/v1/quiz-sets/{id}/questions        (P04, owner-only)
   PATCH  /api/v1/questions/{id}                  (P04, owner-only)
   DELETE /api/v1/questions/{id}                  (P04, owner-only)
+  POST   /api/v1/rooms                           (P05, host-only)
+  GET    /api/v1/rooms/{code}                    (P05)
+  POST   /api/v1/rooms/{code}/join               (P05, optional auth)
 
 ClickHouse is not pinged in P00; it is a soft dependency until P08.
 """
@@ -36,8 +39,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from app.api.v1 import auth as auth_router
 from app.api.v1 import questions as questions_router
 from app.api.v1 import quiz_sets as quiz_sets_router
+from app.api.v1 import rooms as rooms_router
 from app.api.v1 import users as users_router
 from app.cache.rate_limit import load_script as load_rate_limit_script
+from app.cache.redis import load_capacity_scripts
 from app.core.config import get_settings
 from app.core.ids import get_id_generator
 from app.core.middleware import RequestIDMiddleware, register_exception_handlers
@@ -62,9 +67,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis_pool = redis_pool
 
     # Pre-load the rate-limit Lua so EVALSHA can be used per-request without
-    # paying the SCRIPT LOAD round-trip every login.
+    # paying the SCRIPT LOAD round-trip every login. P05 also loads the two
+    # capacity-admission scripts (admit + compensating release) used by
+    # ``RoomSnapshotWriter``.
     async with Redis(connection_pool=redis_pool) as r:
         app.state.rate_limit_sha = await load_rate_limit_script(r)
+        admit_sha, release_sha = await load_capacity_scripts(r)
+        app.state.capacity_admit_sha = admit_sha
+        app.state.capacity_release_sha = release_sha
 
     log.info(
         "startup: service=%s worker_id=%s",
@@ -130,6 +140,7 @@ def create_app() -> FastAPI:
     app.include_router(users_router.router, prefix="/api/v1")
     app.include_router(quiz_sets_router.router, prefix="/api/v1")
     app.include_router(questions_router.router, prefix="/api/v1")
+    app.include_router(rooms_router.router, prefix="/api/v1")
     return app
 
 
