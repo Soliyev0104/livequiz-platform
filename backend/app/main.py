@@ -20,6 +20,7 @@ Surface area:
   POST   /api/v1/rooms                           (P05, host-only)
   GET    /api/v1/rooms/{code}                    (P05)
   POST   /api/v1/rooms/{code}/join               (P05, optional auth)
+  WS     /ws/rooms/{code}                        (P06, participant token)
 
 ClickHouse is not pinged in P00; it is a soft dependency until P08.
 """
@@ -27,6 +28,7 @@ ClickHouse is not pinged in P00; it is a soft dependency until P08.
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -46,6 +48,9 @@ from app.cache.redis import load_capacity_scripts
 from app.core.config import get_settings
 from app.core.ids import get_id_generator
 from app.core.middleware import RequestIDMiddleware, register_exception_handlers
+from app.ws import router as ws_router
+from app.ws.connection_manager import ConnectionManager
+from app.ws.redis_pubsub import start_pubsub_task, stop_pubsub_task
 
 log = logging.getLogger("app")
 
@@ -76,14 +81,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.capacity_admit_sha = admit_sha
         app.state.capacity_release_sha = release_sha
 
+    # P06: per-replica WebSocket plumbing. The ``replica_id`` is the
+    # tag used by ``ConnectionManager.broadcast_all`` to suppress its
+    # own pub/sub loopback. The pattern listener subscribes once to
+    # ``ws:room:*`` so per-room sub/unsub churn is avoided.
+    replica_id = uuid.uuid4().hex
+    manager = ConnectionManager(replica_id=replica_id)
+    pubsub_redis = Redis(connection_pool=redis_pool)
+    pubsub_task, _ready = await start_pubsub_task(pubsub_redis, manager)
+    app.state.replica_id = replica_id
+    app.state.connection_manager = manager
+    app.state.pubsub_redis = pubsub_redis
+    app.state.pubsub_task = pubsub_task
+
     log.info(
-        "startup: service=%s worker_id=%s",
+        "startup: service=%s worker_id=%s replica_id=%s",
         settings.service_name,
         settings.snowflake_worker_id,
+        replica_id,
     )
     try:
         yield
     finally:
+        await stop_pubsub_task(pubsub_task)
+        try:
+            await pubsub_redis.aclose()
+        except Exception:  # noqa: BLE001
+            pass
         await engine.dispose()
         await redis_pool.disconnect()
 
@@ -141,6 +165,9 @@ def create_app() -> FastAPI:
     app.include_router(quiz_sets_router.router, prefix="/api/v1")
     app.include_router(questions_router.router, prefix="/api/v1")
     app.include_router(rooms_router.router, prefix="/api/v1")
+    # WebSocket router lives at the top level (no /api/v1 prefix) per
+    # docs/07_websocket_protocol.md and the Nginx /ws/* proxy rule.
+    app.include_router(ws_router.router)
     return app
 
 

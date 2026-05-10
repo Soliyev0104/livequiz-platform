@@ -402,7 +402,7 @@ async def join_room(
 # ---------------------------------------------------------------------------
 
 
-async def get_snapshot(
+async def build_snapshot(
     session: AsyncSession,
     redis: Redis,
     *,
@@ -410,11 +410,16 @@ async def get_snapshot(
     admit_sha: str,
     release_sha: str,
 ) -> dict[str, Any]:
-    """REST mirror of ``room.snapshot``.
+    """Return the canonical ``room.snapshot`` payload for ``code``.
 
-    Redis-first (the live mutator path keeps it warm); on miss the
-    snapshot is rebuilt from Postgres and re-written through the
-    single mutator so subsequent reads hit Redis again.
+    Used by both the REST mirror (``GET /rooms/{code}``) and the WS
+    handshake in P06. Redis-first (the live mutator path keeps it warm);
+    on miss the snapshot is rebuilt from Postgres and re-written
+    through the single mutator so subsequent reads hit Redis again.
+
+    Match data and the live leaderboard are P07's responsibility — the
+    fields exist as ``match: None`` and ``leaderboard: []`` in the lobby
+    state so consumers can already structure-match on them.
     """
     writer = _writer(redis, admit_sha=admit_sha, release_sha=release_sha)
     cached = await writer.read(code)
@@ -434,6 +439,11 @@ async def get_snapshot(
     await writer.participants_count_init(code, count)
     await writer.write(code, snapshot, status=room.status)
     return snapshot
+
+
+# Back-compat alias for P05 callers (``app.api.v1.rooms``). New code in
+# P06+ should use :func:`build_snapshot` directly.
+get_snapshot = build_snapshot
 
 
 # ---------------------------------------------------------------------------
