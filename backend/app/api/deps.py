@@ -77,6 +77,28 @@ async def current_user(
     return user
 
 
+async def optional_current_user(
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> User | None:
+    """Return the authenticated user, or ``None`` when no/stale token.
+
+    Used by endpoints whose docs/06 auth column is "Optional" — most
+    notably ``GET /quiz-sets`` and ``GET /quiz-sets/{id}``. A missing
+    bearer header returns ``None`` (anonymous viewer); an
+    invalid/revoked/expired token also returns ``None`` rather than
+    401 so a stale browser token cannot lock a user out of public
+    pages.
+    """
+    if creds is None or not creds.credentials:
+        return None
+    try:
+        return await current_user(creds, session, redis)
+    except AuthError:
+        return None
+
+
 def require_role(*allowed: UserRole) -> Callable[[User], User]:
     """Build a dependency that allows only users with one of ``allowed``."""
     allowed_set = {r for r in allowed}

@@ -9,6 +9,14 @@ Surface area:
   POST /api/v1/auth/logout
   GET  /api/v1/me
   GET  /api/v1/users/{id}    (admin-only)
+  GET    /api/v1/quiz-sets                       (P04)
+  POST   /api/v1/quiz-sets                       (P04, host-only)
+  GET    /api/v1/quiz-sets/{id}                  (P04)
+  PATCH  /api/v1/quiz-sets/{id}                  (P04, owner-only)
+  POST   /api/v1/quiz-sets/{id}/publish          (P04, owner-only)
+  POST   /api/v1/quiz-sets/{id}/questions        (P04, owner-only)
+  PATCH  /api/v1/questions/{id}                  (P04, owner-only)
+  DELETE /api/v1/questions/{id}                  (P04, owner-only)
 
 ClickHouse is not pinged in P00; it is a soft dependency until P08.
 """
@@ -26,6 +34,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.api.v1 import auth as auth_router
+from app.api.v1 import questions as questions_router
+from app.api.v1 import quiz_sets as quiz_sets_router
 from app.api.v1 import users as users_router
 from app.cache.rate_limit import load_script as load_rate_limit_script
 from app.core.config import get_settings
@@ -118,6 +128,8 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router.router, prefix="/api/v1")
     app.include_router(users_router.router, prefix="/api/v1")
+    app.include_router(quiz_sets_router.router, prefix="/api/v1")
+    app.include_router(questions_router.router, prefix="/api/v1")
     return app
 
 
