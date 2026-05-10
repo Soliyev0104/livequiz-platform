@@ -33,6 +33,10 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault(
     "DATABASE_URL", "postgresql+asyncpg://livequiz:livequiz@localhost:5432/livequiz"
 )
+# Distinct secrets in tests so a refresh token never validates as access (or
+# vice versa) by accident — exercises the real two-secret topology.
+os.environ.setdefault("JWT_SECRET", "test-access-secret")
+os.environ.setdefault("JWT_REFRESH_SECRET", "test-refresh-secret")
 
 
 @pytest.fixture(scope="session")

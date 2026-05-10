@@ -1,8 +1,14 @@
 """FastAPI application factory.
 
-Phase 00 surface area:
-  GET /api/v1/health   liveness, returns {"status": "ok"}
-  GET /api/v1/ready    readiness, pings Postgres + Redis
+Surface area:
+  GET  /api/v1/health        liveness, returns {"status": "ok"}
+  GET  /api/v1/ready         readiness, pings Postgres + Redis
+  POST /api/v1/auth/register
+  POST /api/v1/auth/login
+  POST /api/v1/auth/refresh
+  POST /api/v1/auth/logout
+  GET  /api/v1/me
+  GET  /api/v1/users/{id}    (admin-only)
 
 ClickHouse is not pinged in P00; it is a soft dependency until P08.
 """
@@ -19,8 +25,12 @@ from redis.asyncio import ConnectionPool, Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from app.core.config import Settings, get_settings
+from app.api.v1 import auth as auth_router
+from app.api.v1 import users as users_router
+from app.cache.rate_limit import load_script as load_rate_limit_script
+from app.core.config import get_settings
 from app.core.ids import get_id_generator
+from app.core.middleware import RequestIDMiddleware, register_exception_handlers
 
 log = logging.getLogger("app")
 
@@ -40,7 +50,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.engine = engine
     app.state.redis_pool = redis_pool
-    log.info("startup: service=%s worker_id=%s", settings.service_name, settings.snowflake_worker_id)
+
+    # Pre-load the rate-limit Lua so EVALSHA can be used per-request without
+    # paying the SCRIPT LOAD round-trip every login.
+    async with Redis(connection_pool=redis_pool) as r:
+        app.state.rate_limit_sha = await load_rate_limit_script(r)
+
+    log.info(
+        "startup: service=%s worker_id=%s",
+        settings.service_name,
+        settings.snowflake_worker_id,
+    )
     try:
         yield
     finally:
@@ -58,6 +78,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    app.add_middleware(RequestIDMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
@@ -65,6 +86,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    register_exception_handlers(app)
 
     @app.get("/api/v1/health")
     async def health() -> dict[str, str]:
@@ -93,8 +116,8 @@ def create_app() -> FastAPI:
         result["clickhouse"] = "skipped"
         return result
 
-    # P03+ routers will mount here. Empty for now.
-    # from app.api.v1 import auth, users, quiz_sets, rooms, matches, analytics, moderation
+    app.include_router(auth_router.router, prefix="/api/v1")
+    app.include_router(users_router.router, prefix="/api/v1")
     return app
 
 

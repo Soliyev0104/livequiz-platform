@@ -14,6 +14,7 @@ dependencies = [
   "alembic>=1.14,<1.15",
   "pydantic>=2.9,<2.10",
   "pydantic-settings>=2.6,<2.7",
+  "email-validator>=2.2,<3",
   "redis[hiredis]>=5.2,<5.3",
   "aiokafka>=0.12,<0.13",
   "clickhouse-connect>=0.8,<0.9",
