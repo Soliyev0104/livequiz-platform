@@ -1,0 +1,15 @@
+[project]
+name = "livequiz-outbox-publisher"
+version = "0.1.0"
+description = "Reads outbox_events, publishes to Redpanda, marks published. Filled in P08."
+requires-python = ">=3.12"
+dependencies = [
+  "sqlalchemy[asyncio]>=2.0,<2.1",
+  "asyncpg>=0.30,<0.31",
+  "aiokafka>=0.12,<0.13",
+  "structlog>=24,<25",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

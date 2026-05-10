@@ -1,0 +1,15 @@
+[project]
+name = "livequiz-stream-worker"
+version = "0.1.0"
+description = "Consumes Redpanda events, dedupes, writes to ClickHouse. Filled in P08."
+requires-python = ">=3.12"
+dependencies = [
+  "aiokafka>=0.12,<0.13",
+  "clickhouse-connect>=0.8,<0.9",
+  "redis[hiredis]>=5.2,<5.3",
+  "structlog>=24,<25",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

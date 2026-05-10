@@ -1,0 +1,61 @@
+# Production override. Apply with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Notes:
+#   * No source mounts; images must be self-contained.
+#   * Nginx swaps to prod.conf (security headers + HSTS + TLS placeholder).
+#   * Only nginx publishes ports.
+#   * GRAFANA_ADMIN_PASSWORD must be set in .env (no default).
+
+services:
+  nginx:
+    restart: always
+    volumes:
+      - ./ops/nginx/prod.conf:/etc/nginx/nginx.conf:ro
+
+  frontend:
+    restart: always
+
+  api-a:
+    restart: always
+
+  api-b:
+    restart: always
+
+  postgres:
+    restart: always
+
+  redis:
+    restart: always
+
+  redpanda:
+    restart: always
+
+  clickhouse:
+    restart: always
+
+  outbox-publisher:
+    restart: always
+
+  stream-worker:
+    restart: always
+
+  scheduler:
+    restart: always
+
+  otel-collector:
+    restart: always
+
+  prometheus:
+    restart: always
+
+  loki:
+    restart: always
+
+  tempo:
+    restart: always
+
+  grafana:
+    restart: always
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set in prod}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"

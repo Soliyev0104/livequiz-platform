@@ -1,0 +1,270 @@
+# LiveQuiz platform — local/dev compose stack.
+# Single public entrypoint: nginx on :80. All other services internal.
+# Production override lives in docker-compose.prod.yml.
+#
+# Usage:
+#   cp env/.env.example .env
+#   docker compose up -d --build
+#   docker compose ps
+#   curl http://localhost/api/v1/health
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./ops/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - api-a
+      - api-b
+    networks: [quiznet]
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_BASE: /api/v1
+      NEXT_PUBLIC_WS_BASE: /ws
+    expose:
+      - "3000"
+    networks: [quiznet]
+
+  api-a: &api
+    build:
+      context: ./backend
+    environment:
+      SERVICE_NAME: api-a
+      APP_ENV: ${APP_ENV:-local}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://livequiz:livequiz@postgres:5432/livequiz}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDPANDA_BOOTSTRAP_SERVERS: ${REDPANDA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-livequiz}
+      JWT_SECRET: ${JWT_SECRET:-change_me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me}
+      JWT_ACCESS_TTL_MIN: ${JWT_ACCESS_TTL_MIN:-15}
+      JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-7}
+      SNOWFLAKE_WORKER_ID: 1
+      SNOWFLAKE_EPOCH_MS: ${SNOWFLAKE_EPOCH_MS:-1767225600000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    networks: [quiznet]
+
+  api-b:
+    <<: *api
+    environment:
+      SERVICE_NAME: api-b
+      APP_ENV: ${APP_ENV:-local}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://livequiz:livequiz@postgres:5432/livequiz}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDPANDA_BOOTSTRAP_SERVERS: ${REDPANDA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-livequiz}
+      JWT_SECRET: ${JWT_SECRET:-change_me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me}
+      JWT_ACCESS_TTL_MIN: ${JWT_ACCESS_TTL_MIN:-15}
+      JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-7}
+      SNOWFLAKE_WORKER_ID: 2
+      SNOWFLAKE_EPOCH_MS: ${SNOWFLAKE_EPOCH_MS:-1767225600000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: livequiz
+      POSTGRES_PASSWORD: livequiz
+      POSTGRES_DB: livequiz
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U livequiz -d livequiz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [quiznet]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [quiznet]
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.9
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+    volumes:
+      - redpandadata:/var/lib/redpanda/data
+    expose:
+      - "9092"
+    networks: [quiznet]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-livequiz}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhousedata:/var/lib/clickhouse
+      - ./migrations/clickhouse:/docker-entrypoint-initdb.d:ro
+    expose:
+      - "8123"
+      - "9000"
+    networks: [quiznet]
+
+  outbox-publisher:
+    build:
+      context: ./workers/outbox_publisher
+    environment:
+      SERVICE_NAME: outbox-publisher
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://livequiz:livequiz@postgres:5432/livequiz}
+      REDPANDA_BOOTSTRAP_SERVERS: ${REDPANDA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      SNOWFLAKE_WORKER_ID: 10
+      SNOWFLAKE_EPOCH_MS: ${SNOWFLAKE_EPOCH_MS:-1767225600000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_started
+    networks: [quiznet]
+
+  stream-worker:
+    build:
+      context: ./workers/stream_worker
+    environment:
+      SERVICE_NAME: stream-worker
+      REDPANDA_BOOTSTRAP_SERVERS: ${REDPANDA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-livequiz}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SNOWFLAKE_WORKER_ID: 20
+      SNOWFLAKE_EPOCH_MS: ${SNOWFLAKE_EPOCH_MS:-1767225600000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+    depends_on:
+      redpanda:
+        condition: service_started
+      clickhouse:
+        condition: service_started
+    networks: [quiznet]
+
+  scheduler:
+    build:
+      context: ./workers/scheduler
+    environment:
+      SERVICE_NAME: scheduler
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://livequiz:livequiz@postgres:5432/livequiz}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SNOWFLAKE_WORKER_ID: 30
+      SNOWFLAKE_EPOCH_MS: ${SNOWFLAKE_EPOCH_MS:-1767225600000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [quiznet]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.112.0
+    command: ["--config=/etc/otel-collector.yaml"]
+    volumes:
+      - ./ops/observability/otel-collector.yaml:/etc/otel-collector.yaml:ro
+    expose:
+      - "4317"
+      - "4318"
+    networks: [quiznet]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./ops/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheusdata:/prometheus
+    expose:
+      - "9090"
+    networks: [quiznet]
+
+  loki:
+    image: grafana/loki:3.2.1
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./ops/observability/loki.yml:/etc/loki/local-config.yaml:ro
+      - lokidata:/loki
+    expose:
+      - "3100"
+    networks: [quiznet]
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: -config.file=/etc/tempo.yaml
+    volumes:
+      - ./ops/observability/tempo.yml:/etc/tempo.yaml:ro
+      - tempodata:/var/tempo
+    expose:
+      - "3200"
+    networks: [quiznet]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./ops/observability/grafana:/etc/grafana/provisioning:ro
+      - grafanadata:/var/lib/grafana
+    expose:
+      - "3000"
+    networks: [quiznet]
+
+volumes:
+  pgdata:
+  redisdata:
+  redpandadata:
+  clickhousedata:
+  prometheusdata:
+  lokidata:
+  tempodata:
+  grafanadata:
+
+networks:
+  quiznet:
+    driver: bridge

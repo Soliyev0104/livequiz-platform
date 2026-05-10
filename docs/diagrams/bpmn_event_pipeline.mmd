@@ -1,0 +1,11 @@
+flowchart TD
+    Start((Start)) --> Tx[API transaction inserts outbox event]
+    Tx --> Poll[Publisher polls unpublished events]
+    Poll --> Publish[Publish to Redpanda]
+    Publish --> Mark[Mark published]
+    Publish --> Consume[Stream worker consumes]
+    Consume --> Validate[Validate and deduplicate]
+    Validate --> InsertRaw[Insert raw event to ClickHouse]
+    InsertRaw --> Aggregate[Update analytics tables/views]
+    Aggregate --> Commit[Commit broker offset]
+    Commit --> End((End))

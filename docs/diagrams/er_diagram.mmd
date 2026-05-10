@@ -1,0 +1,45 @@
+erDiagram
+    USERS ||--o{ QUIZ_SETS : owns
+    QUIZ_SETS ||--o{ QUESTIONS : contains
+    QUESTIONS ||--o{ ANSWER_OPTIONS : has
+    QUIZ_SETS ||--o{ ROOMS : used_in
+    USERS ||--o{ ROOMS : hosts
+    ROOMS ||--o{ ROOM_PARTICIPANTS : has
+    ROOMS ||--o| MATCHES : creates
+    MATCHES ||--o{ MATCH_QUESTIONS : contains
+    QUESTIONS ||--o{ MATCH_QUESTIONS : referenced_by
+    ROOM_PARTICIPANTS ||--o{ ANSWER_SUBMISSIONS : submits
+    MATCH_QUESTIONS ||--o{ ANSWER_SUBMISSIONS : receives
+    MATCHES ||--o{ FINAL_SCORES : produces
+    ROOM_PARTICIPANTS ||--o{ FINAL_SCORES : ranked
+    USERS ||--o{ MODERATION_REPORTS : reports
+    USERS ||--o{ AUDIT_LOGS : performs
+    USERS {
+        bigint id PK
+        string email UK
+        string display_name
+        string role
+    }
+    QUIZ_SETS {
+        bigint id PK
+        bigint owner_id FK
+        string title
+        string visibility
+        boolean is_published
+        int version
+    }
+    ROOMS {
+        bigint id PK
+        string code UK
+        bigint host_id FK
+        bigint quiz_set_id FK
+        string status
+    }
+    ANSWER_SUBMISSIONS {
+        bigint id PK
+        bigint match_question_id FK
+        bigint participant_id FK
+        boolean is_correct
+        int score_awarded
+        int response_time_ms
+    }

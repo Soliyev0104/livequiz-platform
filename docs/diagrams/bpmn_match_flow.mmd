@@ -1,0 +1,16 @@
+flowchart TD
+    Start((Start)) --> CreateRoom[Host creates room]
+    CreateRoom --> Lobby[Players join lobby]
+    Lobby --> StartMatch[Host starts match]
+    StartMatch --> QStart[Server starts question]
+    QStart --> Timer{Deadline reached?}
+    Timer -->|No| Answer[Player submits answer]
+    Answer --> Validate[Validate deadline and uniqueness]
+    Validate --> Score[Score and update leaderboard]
+    Score --> Broadcast[Broadcast leaderboard]
+    Broadcast --> Timer
+    Timer -->|Yes| CloseQuestion[Close question]
+    CloseQuestion --> More{More questions?}
+    More -->|Yes| QStart
+    More -->|No| Finalize[Persist final scores]
+    Finalize --> End((End))

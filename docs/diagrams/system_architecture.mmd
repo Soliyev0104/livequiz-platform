@@ -1,0 +1,26 @@
+flowchart LR
+    Browser[Browser: React UI] -->|HTTP/WS| Nginx[Nginx API Gateway]
+    Nginx --> Frontend[Frontend]
+    Nginx --> APIA[FastAPI API A]
+    Nginx --> APIB[FastAPI API B]
+    APIA --> Postgres[(Postgres)]
+    APIB --> Postgres
+    APIA --> Redis[(Redis)]
+    APIB --> Redis
+    APIA --> CH[(ClickHouse)]
+    APIB --> CH
+    Postgres --> Outbox[Outbox table]
+    Publisher[Outbox Publisher] --> Postgres
+    Publisher --> Redpanda[(Redpanda)]
+    Stream[Stream Worker] --> Redpanda
+    Stream --> CH
+    APIA --> OTel[OTel Collector]
+    APIB --> OTel
+    Publisher --> OTel
+    Stream --> OTel
+    OTel --> Tempo[(Tempo)]
+    OTel --> Prometheus[(Prometheus)]
+    OTel --> Loki[(Loki)]
+    Grafana[Grafana] --> Tempo
+    Grafana --> Prometheus
+    Grafana --> Loki
