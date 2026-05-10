@@ -52,6 +52,10 @@ services:
       SNOWFLAKE_WORKER_ID: 1
       SNOWFLAKE_EPOCH_MS: ${SNOWFLAKE_EPOCH_MS:-1767225600000}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+    volumes:
+      # `python -m app.db.seed` imports `migrations.seeds.*`; the package
+      # lives at the repo root and is mounted read-only into the container.
+      - ./migrations:/app/migrations:ro
     expose:
       - "8000"
     depends_on:

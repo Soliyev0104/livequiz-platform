@@ -1,8 +1,7 @@
 """Alembic environment, async-aware.
 
-P02 will populate target_metadata with the declarative Base.metadata so
-autogenerate works. Until then this env is wired up but no models are
-registered, so `alembic upgrade head` is a no-op.
+`target_metadata = Base.metadata`. Importing `app.db.models` registers every
+mapped class against `Base.metadata` so autogenerate sees all 15 tables.
 """
 
 from __future__ import annotations
@@ -16,14 +15,15 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
+from app.db import models  # noqa: F401  -- side effect: register tables on Base.metadata
+from app.db.base import Base
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# P02: from app.db.base import Base; target_metadata = Base.metadata
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def _get_url() -> str:
