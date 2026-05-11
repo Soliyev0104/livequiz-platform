@@ -141,3 +141,28 @@ async def current_participant(
         participant_id=participant_id,
         nickname=str(claims["nickname"]),
     )
+
+
+async def current_participant_from_header(
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> ParticipantContext:
+    """REST equivalent of :func:`current_participant`.
+
+    The participant token rides ``Authorization: Bearer ...`` for REST so
+    the player-only endpoints (e.g. ``POST /matches/{id}/answers``) accept
+    the same token shape they receive from the WS join flow without
+    having to expose it via a query string.
+    """
+    if creds is None or not creds.credentials:
+        raise AuthError("AUTH_REQUIRED", 401, message="missing participant token")
+    settings = get_settings()
+    claims = decode_token(creds.credentials, PARTICIPANT_TYPE, settings.jwt_secret)
+    try:
+        participant_id = int(claims["participant_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AuthError("AUTH_REQUIRED", 401, message="malformed participant token") from exc
+    return ParticipantContext(
+        room_code=str(claims["room_code"]),
+        participant_id=participant_id,
+        nickname=str(claims["nickname"]),
+    )

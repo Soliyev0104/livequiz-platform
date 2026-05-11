@@ -85,3 +85,33 @@ def room_capacity_counter(code: str) -> str:
 def join_rate_limit_key(ip: str, code: str) -> str:
     """Token-bucket key for ``POST /rooms/{code}/join`` (10/min/IP/room)."""
     return f"rate:join:{ip}:{code}"
+
+
+# ---------------------------------------------------------------------------
+# Match / scoring keys (P07)
+# ---------------------------------------------------------------------------
+
+
+def match_leaderboard(match_id: int | str) -> str:
+    """Sorted set keyed by participant_id, score = total_score."""
+    return f"match:{match_id}:leaderboard"
+
+
+def match_answered(match_id: int | str, question_id: int | str) -> str:
+    """Set of participant_ids who already submitted for a given question."""
+    return f"match:{match_id}:answered:{question_id}"
+
+
+def match_current_question(match_id: int | str) -> str:
+    """JSON snapshot of the active question (for reconnect recovery)."""
+    return f"match:{match_id}:current_question"
+
+
+def match_participant_nick(match_id: int | str) -> str:
+    """Hash participant_id -> nickname for leaderboard rendering."""
+    return f"match:{match_id}:nicknames"
+
+
+def idempotency_key(request_id: str) -> str:
+    """X-Request-ID idempotency cache key."""
+    return f"idem:{request_id}"

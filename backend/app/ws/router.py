@@ -447,21 +447,7 @@ async def _dispatch(
                 }
             )
             return
-        # P07 wires real scoring. For P06 we acknowledge with a
-        # not-yet-scored receipt so the client receive loop has shape
-        # parity with production.
-        await conn.send(
-            {
-                "type": "answer.accepted",
-                "message_id": message.message_id,
-                "payload": {
-                    "submission_id": message.message_id,
-                    "accepted": False,
-                    "score_awarded": 0,
-                    "response_time_ms": 0,
-                },
-            }
-        )
+        await _ws_submit_answer(message, conn)
         return
 
     if isinstance(message, (HostQuestionNextMessage, HostMatchPauseMessage)):
@@ -477,13 +463,15 @@ async def _dispatch(
                 }
             )
             return
-        # Host control surface is wired in P07. Acknowledge for now.
+        # Host control surface lives at the REST endpoints
+        # (POST /rooms/{code}/{pause,resume,next,end}). The WS messages
+        # are advisory hints only — clients should call REST.
         await conn.send(
             {
                 "type": "error",
                 "payload": {
                     "code": "NOT_IMPLEMENTED",
-                    "message": "host control wires up in P07",
+                    "message": "use REST host-control endpoints",
                     "retry_after_ms": None,
                 },
             }
@@ -491,3 +479,94 @@ async def _dispatch(
         return
 
     log.warning("ws unhandled message type=%s conn=%s", type(message).__name__, conn.conn_id)
+
+
+async def _ws_submit_answer(
+    message: AnswerSubmitMessage, conn: WebSocketConnection
+) -> None:
+    """Bridge the WS ``answer.submit`` payload into the P07 service.
+
+    The service owns idempotency, scoring, the outbox, and the
+    leaderboard broadcast. Here we only translate the WS envelope to
+    the service signature and push a private ``answer.accepted`` ack
+    back to this connection. Errors land on the client as ``error``
+    envelopes carrying the documented error codes.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.core.security import AuthError
+    from app.schemas.match import AnswerSubmitRequest
+    from app.services import match_service
+
+    app = conn.ws.app
+    runtime: match_service.MatchRuntime | None = getattr(
+        app.state, "match_runtime", None
+    )
+    if runtime is None:
+        await conn.send(
+            {
+                "type": "error",
+                "message_id": message.message_id,
+                "payload": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "match runtime not initialised",
+                },
+            }
+        )
+        return
+
+    try:
+        match_id = int(message.payload.match_id)
+        match_question_id = int(message.payload.match_question_id)
+        selected_ids = [int(x) for x in message.payload.selected_option_ids]
+    except (TypeError, ValueError):
+        await conn.send(
+            {
+                "type": "error",
+                "message_id": message.message_id,
+                "payload": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "invalid id in payload",
+                },
+            }
+        )
+        return
+
+    request = AnswerSubmitRequest(
+        match_question_id=match_question_id,
+        selected_option_ids=selected_ids,
+        client_sent_at=None,
+    )
+    sm = async_sessionmaker(app.state.engine, expire_on_commit=False)
+    try:
+        async with sm() as session:
+            result = await match_service.submit_answer(
+                session,
+                runtime,
+                match_id=match_id,
+                participant_id=conn.participant_id,
+                payload=request,
+                request_id=message.message_id,
+            )
+    except AuthError as exc:
+        await conn.send(
+            {
+                "type": "error",
+                "message_id": message.message_id,
+                "payload": {"code": exc.code, "message": exc.message or ""},
+            }
+        )
+        return
+
+    await conn.send(
+        {
+            "type": "answer.accepted",
+            "message_id": message.message_id,
+            "payload": {
+                "submission_id": str(result["submission_id"]),
+                "accepted": bool(result.get("accepted")),
+                "score_awarded": int(result.get("score_awarded", 0)),
+                "response_time_ms": int(result.get("response_time_ms", 0)),
+            },
+        }
+    )

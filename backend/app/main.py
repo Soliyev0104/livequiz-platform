@@ -20,6 +20,12 @@ Surface area:
   POST   /api/v1/rooms                           (P05, host-only)
   GET    /api/v1/rooms/{code}                    (P05)
   POST   /api/v1/rooms/{code}/join               (P05, optional auth)
+  POST   /api/v1/rooms/{code}/start              (P07, host-only)
+  POST   /api/v1/rooms/{code}/pause              (P07, host-only)
+  POST   /api/v1/rooms/{code}/resume             (P07, host-only)
+  POST   /api/v1/rooms/{code}/end                (P07, host-only)
+  POST   /api/v1/matches/{id}/answers            (P07, participant token)
+  GET    /api/v1/matches/{id}/leaderboard        (P07, participant token)
   WS     /ws/rooms/{code}                        (P06, participant token)
 
 ClickHouse is not pinged in P00; it is a soft dependency until P08.
@@ -39,15 +45,18 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.api.v1 import auth as auth_router
+from app.api.v1 import matches as matches_router
 from app.api.v1 import questions as questions_router
 from app.api.v1 import quiz_sets as quiz_sets_router
 from app.api.v1 import rooms as rooms_router
 from app.api.v1 import users as users_router
+from app.cache import leaderboard as lb_cache
 from app.cache.rate_limit import load_script as load_rate_limit_script
 from app.cache.redis import load_capacity_scripts
 from app.core.config import get_settings
 from app.core.ids import get_id_generator
 from app.core.middleware import RequestIDMiddleware, register_exception_handlers
+from app.services import match_service
 from app.ws import router as ws_router
 from app.ws.connection_manager import ConnectionManager
 from app.ws.redis_pubsub import start_pubsub_task, stop_pubsub_task
@@ -74,12 +83,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Pre-load the rate-limit Lua so EVALSHA can be used per-request without
     # paying the SCRIPT LOAD round-trip every login. P05 also loads the two
     # capacity-admission scripts (admit + compensating release) used by
-    # ``RoomSnapshotWriter``.
+    # ``RoomSnapshotWriter``. P07 adds the leaderboard increment script.
     async with Redis(connection_pool=redis_pool) as r:
         app.state.rate_limit_sha = await load_rate_limit_script(r)
         admit_sha, release_sha = await load_capacity_scripts(r)
         app.state.capacity_admit_sha = admit_sha
         app.state.capacity_release_sha = release_sha
+        app.state.leaderboard_sha = await lb_cache.load_script(r)
 
     # P06: per-replica WebSocket plumbing. The ``replica_id`` is the
     # tag used by ``ConnectionManager.broadcast_all`` to suppress its
@@ -94,6 +104,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.pubsub_redis = pubsub_redis
     app.state.pubsub_task = pubsub_task
 
+    # P07: long-lived sessionmaker + match runtime for the scheduler tasks.
+    # Scheduler tasks fire after the originating request has returned, so
+    # they cannot share its request-scoped session.
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+    runtime = match_service.MatchRuntime(
+        sessionmaker=sessionmaker,
+        redis_pool=redis_pool,
+        connection_manager=manager,
+        capacity_admit_sha=admit_sha,
+        capacity_release_sha=release_sha,
+        leaderboard_sha=app.state.leaderboard_sha,
+    )
+    app.state.match_runtime = runtime
+    app.state.match_scheduler = match_service._scheduler_singleton()
+
+    # Re-arm timers for any match left running by a previous process crash.
+    try:
+        recovered = await match_service.recover_running_matches(runtime)
+        if recovered:
+            log.info("startup: recovered %d running match(es)", recovered)
+    except Exception as exc:  # noqa: BLE001 — recovery must not block startup
+        log.warning("match recovery failed: %s", exc)
+
     log.info(
         "startup: service=%s worker_id=%s replica_id=%s",
         settings.service_name,
@@ -103,6 +138,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        try:
+            await app.state.match_scheduler.cancel_all()
+        except Exception:  # noqa: BLE001
+            pass
         await stop_pubsub_task(pubsub_task)
         try:
             await pubsub_redis.aclose()
@@ -165,6 +204,10 @@ def create_app() -> FastAPI:
     app.include_router(quiz_sets_router.router, prefix="/api/v1")
     app.include_router(questions_router.router, prefix="/api/v1")
     app.include_router(rooms_router.router, prefix="/api/v1")
+    # P07 host-control endpoints sit under /rooms/{code}/{start,pause,resume,end}
+    # and the participant-facing answer/leaderboard surface under /matches/...
+    app.include_router(matches_router.room_router, prefix="/api/v1")
+    app.include_router(matches_router.match_router, prefix="/api/v1")
     # WebSocket router lives at the top level (no /api/v1 prefix) per
     # docs/07_websocket_protocol.md and the Nginx /ws/* proxy rule.
     app.include_router(ws_router.router)
