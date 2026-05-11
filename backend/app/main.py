@@ -47,6 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from app.api.v1 import analytics as analytics_router
 from app.api.v1 import auth as auth_router
 from app.api.v1 import matches as matches_router
+from app.api.v1 import moderation as moderation_router
 from app.api.v1 import questions as questions_router
 from app.api.v1 import quiz_sets as quiz_sets_router
 from app.api.v1 import rooms as rooms_router
@@ -236,6 +237,8 @@ def create_app() -> FastAPI:
     # P07 match endpoints. Registered as its own router so the
     # dual-mode (host OR participant) auth dep is local.
     app.include_router(analytics_router.router, prefix="/api/v1")
+    # P09 moderation surface: POST /reports + GET/POST /moderation/reports/*
+    app.include_router(moderation_router.router, prefix="/api/v1")
     # WebSocket router lives at the top level (no /api/v1 prefix) per
     # docs/07_websocket_protocol.md and the Nginx /ws/* proxy rule.
     app.include_router(ws_router.router)

@@ -46,6 +46,13 @@ log = logging.getLogger("app.ws.connection_manager")
 ORIGIN_FIELD = "_origin_replica_id"
 
 
+# Application-defined close code used by the P09 mute decision path.
+# The synthetic ``participant.kicked`` envelope arrives via pub/sub and
+# the manager translates it into a per-socket close on the matching
+# participant id.
+KICKED_CLOSE_CODE = 4002
+
+
 # ---------------------------------------------------------------------------
 # Connection record
 # ---------------------------------------------------------------------------
@@ -137,7 +144,15 @@ class ConnectionManager:
     async def broadcast_local(
         self, room_code: str, message: dict[str, Any]
     ) -> int:
-        """Deliver ``message`` to every connection in ``room_code`` on this replica."""
+        """Deliver ``message`` to every connection in ``room_code`` on this replica.
+
+        The synthetic ``participant.kicked`` envelope (emitted by the P09
+        moderation mute path) is treated specially: every member in the
+        room receives the informational frame, and the connection whose
+        ``participant_id`` matches the payload is closed with
+        ``KICKED_CLOSE_CODE`` so the client transport teardown is
+        observable from the kicked participant's side.
+        """
         clean = {k: v for k, v in message.items() if k != ORIGIN_FIELD}
         members = self.members(room_code)
         if not members:
@@ -146,7 +161,38 @@ class ConnectionManager:
         results = await asyncio.gather(
             *(conn.send(clean) for conn in members), return_exceptions=False
         )
-        return sum(1 for ok in results if ok)
+        delivered = sum(1 for ok in results if ok)
+
+        if clean.get("type") == "participant.kicked":
+            await self._close_kicked(room_code, clean)
+        return delivered
+
+    async def _close_kicked(
+        self, room_code: str, message: dict[str, Any]
+    ) -> None:
+        """Close every connection in ``room_code`` whose participant_id matches.
+
+        Tolerates string/int ``participant_id`` because tokens encode the
+        snowflake as a string but the connection record keeps it as int.
+        Multiple sockets per participant (rare — duplicate tabs) all close.
+        """
+        payload = message.get("payload")
+        if not isinstance(payload, dict):
+            return
+        raw_pid = payload.get("participant_id")
+        try:
+            target_pid = int(raw_pid)
+        except (TypeError, ValueError):
+            return
+        for conn in self.members(room_code):
+            if conn.participant_id != target_pid:
+                continue
+            try:
+                await conn.ws.close(code=KICKED_CLOSE_CODE, reason="muted")
+            except Exception as exc:  # noqa: BLE001 — close is best-effort
+                log.info(
+                    "ws close-on-kick failed conn=%s: %s", conn.conn_id, exc
+                )
 
     async def broadcast_all(
         self,

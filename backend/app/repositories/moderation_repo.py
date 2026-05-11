@@ -31,6 +31,23 @@ class ModerationRepo:
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_by_status(
+        self,
+        status: ModerationStatus | None,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ModerationReport]:
+        stmt = select(ModerationReport)
+        if status is not None:
+            stmt = stmt.where(ModerationReport.status == status)
+        stmt = (
+            stmt.order_by(ModerationReport.created_at.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def update_status(
         self,
         report: ModerationReport,

@@ -56,6 +56,9 @@ services:
       # `python -m app.db.seed` imports `migrations.seeds.*`; the package
       # lives at the repo root and is mounted read-only into the container.
       - ./migrations:/app/migrations:ro
+      # P09 moderation policy is read at runtime so the list can be
+      # updated without rebuilding the image.
+      - ./ops/moderation:/app/ops/moderation:ro
     expose:
       - "8000"
     depends_on:

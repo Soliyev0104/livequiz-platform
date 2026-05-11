@@ -374,6 +374,17 @@ async def join_room(
         )
     )
 
+    # P09: rule-based nickname moderation. Reports are inserted in this
+    # same transaction; the join itself proceeds either way.
+    from app.services import moderation_service
+
+    await moderation_service.auto_flag_on_join(
+        session,
+        room=room,
+        nickname=participant.nickname,
+        user_id=user.id if user is not None else None,
+    )
+
     await session.commit()
 
     # 6) Refresh snapshot from authoritative DB state.

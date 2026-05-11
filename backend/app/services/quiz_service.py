@@ -519,8 +519,13 @@ async def publish_quiz_set(
             details={"quiz_set_id": quiz_set_id},
         )
 
-    # TODO(P09): rule-based moderation runs here. No-op stub today.
+    # P09: rule-based content moderation. ``auto_flag_on_publish``
+    # inserts report rows for any banned-word matches in the same
+    # transaction as the publish; the flow is informational, not
+    # blocking — flagged quizzes still publish so the moderator queue
+    # can review them.
     await moderation_service.scan_quiz(quiz)
+    await moderation_service.auto_flag_on_publish(session, quiz_set=quiz)
 
     issues = validate_publish(quiz)
     if issues:

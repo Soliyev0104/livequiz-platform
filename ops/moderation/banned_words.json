@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "description": "Rule-based content moderation policy for LiveQuiz. Demo-grade list — replace with curated data for production. Words and regexes are case-insensitive.",
+  "words": [
+    "fuck",
+    "shit",
+    "bitch",
+    "asshole",
+    "bastard",
+    "dick",
+    "cunt",
+    "slut",
+    "whore",
+    "nigger",
+    "nigga",
+    "faggot",
+    "retard",
+    "pussy",
+    "wanker",
+    "kike",
+    "spic",
+    "chink",
+    "tranny",
+    "twat"
+  ],
+  "patterns": [
+    {"name": "obfuscated_fuck", "regex": "f[\\W_]*[u\\*\\@][\\W_]*c[\\W_]*k"},
+    {"name": "obfuscated_shit", "regex": "s[\\W_]*h[\\W_]*[i1!][\\W_]*t"},
+    {"name": "obfuscated_bitch", "regex": "b[\\W_]*[i1!][\\W_]*t[\\W_]*c[\\W_]*h"},
+    {"name": "leet_admin_impersonation", "regex": "\\b(admin|moderator|staff|owner)\\b"},
+    {"name": "url_in_nickname", "regex": "https?://"}
+  ]
+}
