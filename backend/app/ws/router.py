@@ -70,6 +70,8 @@ WS_RATE_CAPACITY = 30
 WS_RATE_REFILL = 30  # tokens / sec
 ANSWER_RATE_LIMIT = 5
 ANSWER_RATE_TTL_S = 600
+HOST_RATE_CAPACITY = 60
+HOST_RATE_REFILL = 1
 
 # WebSocket close codes — application-defined 4xxx range.
 CLOSE_UNAUTHORIZED = 4401
@@ -164,6 +166,21 @@ async def _answer_rate_check(
     if val == 1:
         await redis.expire(key, ANSWER_RATE_TTL_S)
     return val <= ANSWER_RATE_LIMIT
+
+
+async def _host_rate_check(
+    redis: Redis, rate_sha: str, participant_id: int
+) -> tuple[bool, int]:
+    """Host control advisory messages: 60/minute token bucket."""
+    allowed, _remaining, retry_after_ms = await rate_acquire(
+        redis,
+        rate_sha,
+        f"rate:host:{participant_id}",
+        capacity=HOST_RATE_CAPACITY,
+        refill_per_sec=HOST_RATE_REFILL,
+        cost=1,
+    )
+    return allowed, retry_after_ms
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +428,7 @@ async def _receive_loop(
             )
             continue
 
-        await _dispatch(message, conn, room_code, redis, manager)
+        await _dispatch(message, conn, room_code, redis, manager, rate_sha)
 
 
 async def _dispatch(
@@ -420,6 +437,7 @@ async def _dispatch(
     room_code: str,
     redis: Redis,
     manager: ConnectionManager,
+    rate_sha: str,
 ) -> None:
     if isinstance(message, HeartbeatMessage):
         await conn.send(
@@ -462,6 +480,21 @@ async def _dispatch(
                         "code": "FORBIDDEN",
                         "message": "host-only message",
                         "retry_after_ms": None,
+                    },
+                }
+            )
+            return
+        allowed, retry_after_ms = await _host_rate_check(
+            redis, rate_sha, conn.participant_id
+        )
+        if not allowed:
+            await conn.send(
+                {
+                    "type": "error",
+                    "payload": {
+                        "code": "RATE_LIMITED",
+                        "message": "host message rate exceeded",
+                        "retry_after_ms": int(retry_after_ms),
                     },
                 }
             )

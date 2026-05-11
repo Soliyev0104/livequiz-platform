@@ -13,7 +13,6 @@ livequiz-platform/
 ├── .env.example
 ├── .gitignore
 ├── docs/
-│   ├── 00_START_HERE_FOR_AI.md
 │   ├── 01_product_requirements.md
 │   ├── 02_architecture.md
 │   ├── 03_folder_structure.md
@@ -29,8 +28,7 @@ livequiz-platform/
 │   ├── 13_frontend_ui_ux.md
 │   ├── 14_testing_deployment.md
 │   ├── 15_report_outline.md
-│   ├── 16_ai_coding_prompts.md
-│   ├── 17_team_task_split.md
+│   ├── 16_team_task_split.md
 │   └── diagrams/
 │       ├── system_architecture.mmd
 │       ├── er_diagram.mmd

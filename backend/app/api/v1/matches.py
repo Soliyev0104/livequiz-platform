@@ -26,16 +26,20 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Query, Request, status
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
     ParticipantContext,
     current_participant_from_header,
+    get_redis,
     get_session,
     require_role,
 )
+from app.core.security import AuthError
 from app.db.models.enums import UserRole
 from app.db.models.user import User
+from app.schemas.common import ERROR_RESPONSES
 from app.schemas.match import (
     AnswerSubmitRequest,
     AnswerSubmitResponse,
@@ -45,8 +49,8 @@ from app.schemas.match import (
 )
 from app.services import match_service
 
-room_router = APIRouter(prefix="/rooms", tags=["matches"])
-match_router = APIRouter(prefix="/matches", tags=["matches"])
+room_router = APIRouter(prefix="/rooms", tags=["matches"], responses=ERROR_RESPONSES)
+match_router = APIRouter(prefix="/matches", tags=["matches"], responses=ERROR_RESPONSES)
 
 
 def _runtime(request: Request) -> match_service.MatchRuntime:
@@ -73,6 +77,7 @@ async def start_match(
     host: Annotated[User, Depends(require_role(UserRole.host, UserRole.admin))],
 ) -> MatchStartedResponse:
     from sqlalchemy import func, select
+
     from app.db.models.match_question import MatchQuestion
 
     runtime = _runtime(request)
@@ -131,9 +136,9 @@ async def end_match(
     The end transaction is owned by the service (it opens its own session
     via the runtime's sessionmaker), so we just resolve room→match here.
     """
+    from app.core.security import AuthError
     from app.repositories.match_repo import MatchRepo
     from app.repositories.room_repo import RoomRepo
-    from app.core.security import AuthError
 
     room = await RoomRepo(session).get_by_code(code)
     if room is None:
@@ -167,6 +172,7 @@ async def submit_answer(
     payload: AnswerSubmitRequest,
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
     participant: Annotated[
         ParticipantContext, Depends(current_participant_from_header)
     ],
@@ -174,6 +180,18 @@ async def submit_answer(
 ) -> AnswerSubmitResponse:
     runtime = _runtime(request)
     request_id = x_request_id or getattr(request.state, "request_id", "") or ""
+    rate_key = f"rate:answer:{participant.participant_id}:{payload.match_question_id}"
+    attempts = await redis.incr(rate_key)
+    if attempts == 1:
+        await redis.expire(rate_key, 600)
+    if attempts > 5:
+        ttl_ms = await redis.pttl(rate_key)
+        raise AuthError(
+            "RATE_LIMITED",
+            429,
+            message="answer attempts exceeded",
+            details={"retry_after_ms": max(0, int(ttl_ms))},
+        )
     result = await match_service.submit_answer(
         session,
         runtime,

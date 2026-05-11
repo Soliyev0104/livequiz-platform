@@ -20,10 +20,11 @@ from app.api.deps import current_user, get_redis, get_session
 from app.cache.keys import QUIZ_LIST_PREFIX
 from app.cache.redis import invalidate_prefix
 from app.db.models.user import User
+from app.schemas.common import ERROR_RESPONSES
 from app.schemas.quiz import QuestionDetail, QuestionUpdate
 from app.services import quiz_service
 
-router = APIRouter(prefix="/questions", tags=["questions"])
+router = APIRouter(prefix="/questions", tags=["questions"], responses=ERROR_RESPONSES)
 
 
 @router.patch("/{question_id}", response_model=QuestionDetail)

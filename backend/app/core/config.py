@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     )
     clickhouse_url: str = Field(default="http://clickhouse:8123", alias="CLICKHOUSE_URL")
     clickhouse_db: str = Field(default="livequiz", alias="CLICKHOUSE_DB")
+    leaderboard_backend: str = Field(default="redis", alias="LEADERBOARD_BACKEND")
 
     jwt_secret: str = Field(default="change_me", alias="JWT_SECRET")
     jwt_refresh_secret: str = Field(default="change_me", alias="JWT_REFRESH_SECRET")

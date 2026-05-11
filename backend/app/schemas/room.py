@@ -16,20 +16,39 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from app.db.models.enums import RoomStatus
 
-
 # ---------------------------------------------------------------------------
 # Create room
 # ---------------------------------------------------------------------------
 
 
 class RoomCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "quiz_set_id": "781234567890123456",
+                "max_players": 50,
+                "settings": {"scoring_mode": "speed_bonus"},
+            }
+        }
+    )
+
     quiz_set_id: int
     max_players: int = Field(default=50, ge=2, le=500)
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
 class RoomCreateResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "room_id": "781234567890123457",
+                "code": "DEMO01",
+                "status": "lobby",
+                "host_ws_url": "/ws/rooms/DEMO01?token=...",
+            }
+        },
+    )
 
     room_id: int
     code: str
@@ -47,11 +66,30 @@ class RoomCreateResponse(BaseModel):
 
 
 class RoomJoinRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"nickname": "Ada", "guest_id": "browser-session-1"}
+        }
+    )
+
     nickname: str = Field(min_length=1, max_length=60)
     guest_id: str | None = Field(default=None, max_length=120)
 
 
 class RoomJoinResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "participant_id": "781234567890123458",
+                "room_id": "781234567890123457",
+                "code": "DEMO01",
+                "nickname": "Ada",
+                "participant_token": "eyJhbGciOi...",
+                "ws_url": "/ws/rooms/DEMO01?token=...",
+            }
+        }
+    )
+
     participant_id: int
     room_id: int
     code: str

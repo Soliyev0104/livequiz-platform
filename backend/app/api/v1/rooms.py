@@ -28,6 +28,7 @@ from app.api.deps import (
 )
 from app.db.models.enums import UserRole
 from app.db.models.user import User
+from app.schemas.common import ERROR_RESPONSES
 from app.schemas.room import (
     RoomCreate,
     RoomCreateResponse,
@@ -37,7 +38,7 @@ from app.schemas.room import (
 )
 from app.services import room_service
 
-router = APIRouter(prefix="/rooms", tags=["rooms"])
+router = APIRouter(prefix="/rooms", tags=["rooms"], responses=ERROR_RESPONSES)
 
 
 def _admit_sha(request: Request) -> str:

@@ -47,6 +47,7 @@ from app.db.models.answer_submission import AnswerSubmission
 from app.db.models.enums import UserRole
 from app.db.models.match_question import MatchQuestion
 from app.db.models.outbox_event import OutboxEvent
+from app.db.models.question import Question
 from app.db.models.user import User
 from app.main import create_app
 from app.services import match_service
@@ -191,7 +192,7 @@ async def _create_published_quiz(
             "position": 1,
             "body": "What is 2+2?",
             "type": "single_choice",
-            "time_limit_seconds": time_limit_seconds,
+            "time_limit_seconds": max(5, time_limit_seconds),
             "points": 1000,
             "options": [
                 {"position": 1, "body": "3", "is_correct": False},
@@ -267,6 +268,13 @@ async def _setup_match(
     quiz_id, options = await _create_published_quiz(
         client, host_token, time_limit_seconds=time_limit_seconds
     )
+    if time_limit_seconds < 5:
+        sm = async_sessionmaker(migrated_engine, expire_on_commit=False)
+        async with sm() as s:
+            stmt = select(Question).where(Question.quiz_set_id == int(quiz_id))
+            question = (await s.execute(stmt)).scalar_one()
+            question.time_limit_seconds = time_limit_seconds
+            await s.commit()
     correct_option_id = next(int(o["id"]) for o in options if o["is_correct"])
 
     room = await _create_room(client, host_token, quiz_id)

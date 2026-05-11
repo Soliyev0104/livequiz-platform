@@ -1,0 +1,9 @@
+Deployed URL:
+GitHub repository:
+Team roster:
+  - Name:
+  - Name:
+  - Name:
+
+Demo credentials:
+  See README.md -> Demo credentials.

@@ -86,4 +86,4 @@ LiveQuiz lets a host create quiz sets, open a live game room, invite players wit
 
 ## MVP scope
 
-Build live quiz rooms, timed questions, scoring, leaderboard, analytics, and moderation. Avoid payments, mobile app, voice/video chat, complex social graph, and external AI moderation for v1.
+Build live quiz rooms, timed questions, scoring, leaderboard, analytics, and moderation. Avoid payments, mobile app, voice/video chat, complex social graph, and external automated moderation for v1.

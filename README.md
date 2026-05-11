@@ -17,19 +17,39 @@ Production should expose only Nginx on ports 80/443. Internal services stay on t
 
 | Requirement | How LiveQuiz satisfies it                                                                                             |
 |---|-----------------------------------------------------------------------------------------------------------------------|
-| R1 Business scenario | Online multiplayer quiz platform: real-time rooms, leaderboard, post-match analytics, content moderation.             |
-| R2 Diagrams | ER, system architecture, project structure, compose dependency graph, BPMN diagrams in `docs/diagrams/`.              |
-| R3 Relational DBMS | Postgres + Alembic migrations + seed data.                                                                            |
-| R4 REST API | FastAPI with OpenAPI/Swagger at `/api/docs`.                                                                          |
-| R5 Polyglot persistence | Redis for live room state/cache/presence; ClickHouse for event analytics.                                             |
-| R6 Optimization | Redis cache, Redis sorted-set leaderboards, Postgres indexes, ClickHouse analytics tables, measured before/after plan. |
-| R7 Additional API style | WebSocket gameplay protocol at `/ws/rooms/{room_code}`.                                                               |
-| R8 Gateway/load balancing | Nginx routes frontend/API/WS and load-balances two FastAPI replicas.                                                  |
-| R9 Docker Compose | Single `docker-compose.yml`, health checks, named volumes, one public gateway port.                                   |
-| R10 Pipeline | Redpanda event stream + `stream-worker` writing analytics/events to ClickHouse; BPMN included.                        |
-| R11 From-scratch component | Snowflake-style ID generator in `backend/app/core/ids/`, integrated for rooms, matches, submissions, events.          |
-| R12 Observability | OpenTelemetry traces, Prometheus metrics, Loki logs, Tempo traces, Grafana dashboards.                                |
-| R13 Documentation | Root README, API docs, CHANGELOG, contributor guide, docs folder.                                                     |
+| R1 Business scenario | Online multiplayer quiz platform: real-time rooms, leaderboard, post-match analytics, content moderation; see `docs/01_product_requirements.md`. |
+| R2 Diagrams | ER, system architecture, project structure, compose dependency graph, BPMN diagrams in `docs/diagrams/`. |
+| R3 Relational DBMS | Postgres models in `backend/app/db/models/`, Alembic baseline in `backend/alembic/versions/0001_baseline.py`, seed data in `migrations/seeds/`. |
+| R4 REST API | FastAPI routers in `backend/app/api/v1/` and `backend/app/main.py`; Swagger at `/api/docs`, ReDoc at `/api/redoc`. |
+| R5 Polyglot persistence | Redis cache/live state in `backend/app/cache/`; ClickHouse migrations in `migrations/clickhouse/`. |
+| R6 Optimization | Redis list cache, sorted-set leaderboards, Postgres indexes, ClickHouse analytics, and measurements in `scripts/measurements/`. |
+| R7 Additional API style | WebSocket gameplay protocol at `/ws/rooms/{room_code}` in `backend/app/ws/router.py`, documented in `docs/07_websocket_protocol.md`. |
+| R8 Gateway/load balancing | Nginx routes frontend/API/WS and load-balances two FastAPI replicas via `ops/nginx/nginx.conf` and `ops/nginx/prod.conf`. |
+| R9 Docker Compose | `docker-compose.yml` plus `docker-compose.prod.yml`, health checks, named volumes, one public gateway port. |
+| R10 Pipeline | Redpanda event stream + `workers/outbox_publisher/` + `workers/stream_worker/`; BPMN in `docs/08_streaming_pipeline_and_bpmn.md`. |
+| R11 From-scratch component | Snowflake-style ID generator in `backend/app/core/ids/`, integrated for users, rooms, matches, submissions, and events. |
+| R12 Observability | OpenTelemetry in `backend/app/core/telemetry.py`, Prometheus metrics, Loki, Tempo, and Grafana dashboards in `ops/observability/`. |
+| R13 Documentation | Root README, `docs/deployment.md`, `CHANGELOG.md`, `LINKS.txt`, `CONTRIBUTING.md`, and report screenshot procedure. |
+
+## Demo credentials
+
+Seed users from `migrations/seeds/seed_users.py`:
+
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@livequiz.local` | `admin` |
+| Host | `host@livequiz.local` | `host` |
+| Player 1 | `player1@livequiz.local` | `player` |
+| Player 2 | `player2@livequiz.local` | `player` |
+
+Seed content includes the published quiz `Computer Networks basics` and demo room `DEMO01`.
+
+## Known limitations
+
+- Single-VM Docker Compose deployment, not Kubernetes or multi-region.
+- One Redpanda broker and one Redis instance in the submission stack.
+- Rule-based moderation rather than ML-assisted moderation.
+- WebSocket recovery uses room snapshots and current-question state, not full event replay.
 
 ## Recommended repository name
 

@@ -4,13 +4,23 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas._email import LooseEmailStr
 from app.schemas.user import UserPublic
 
 
 class RegisterRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "host@example.com",
+                "password": "StrongPass123!",
+                "display_name": "Demo Host",
+            }
+        }
+    )
+
     email: LooseEmailStr = Field(max_length=254)
     password: str = Field(min_length=8, max_length=128)
     display_name: str = Field(min_length=1, max_length=80)
@@ -22,6 +32,12 @@ class RegisterRequest(BaseModel):
 # reserved ``.local`` TLD, which email-validator rejects; and login matches
 # against stored credentials, so RFC-strict validation is unnecessary here.
 class LoginRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"email": "host@livequiz.local", "password": "host"}
+        }
+    )
+
     email: LooseEmailStr = Field(max_length=254)
     password: str = Field(min_length=1, max_length=256)
 
@@ -31,6 +47,17 @@ class RefreshRequest(BaseModel):
 
 
 class TokenPair(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "access_token": "eyJhbGciOi...",
+                "refresh_token": "eyJhbGciOi...",
+                "token_type": "bearer",
+                "expires_in": 900,
+            }
+        }
+    )
+
     access_token: str
     refresh_token: str
     token_type: Literal["bearer"] = "bearer"

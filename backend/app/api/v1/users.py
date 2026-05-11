@@ -12,9 +12,10 @@ from app.core.security import AuthError
 from app.db.models.enums import UserRole
 from app.db.models.user import User
 from app.repositories.user_repo import UserRepo
+from app.schemas.common import ERROR_RESPONSES
 from app.schemas.user import UserPublic
 
-router = APIRouter(tags=["users"])
+router = APIRouter(tags=["users"], responses=ERROR_RESPONSES)
 
 
 @router.get("/me", response_model=UserPublic)

@@ -37,10 +37,10 @@ from app.db.models.enums import UserRole
 from app.db.models.match import Match
 from app.db.models.room import Room
 from app.repositories.user_repo import UserRepo
+from app.schemas.common import ERROR_RESPONSES
 from app.services import analytics_service
 
-
-router = APIRouter(prefix="/matches", tags=["analytics"])
+router = APIRouter(prefix="/matches", tags=["analytics"], responses=ERROR_RESPONSES)
 
 
 _bearer = HTTPBearer(auto_error=False)

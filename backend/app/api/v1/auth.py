@@ -21,9 +21,10 @@ from app.schemas.auth import (
     RegisterResponse,
     TokenPair,
 )
+from app.schemas.common import ERROR_RESPONSES
 from app.services import auth_service
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"], responses=ERROR_RESPONSES)
 
 
 @router.post(

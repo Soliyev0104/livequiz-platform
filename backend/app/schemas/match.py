@@ -12,7 +12,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
-
 # ---------------------------------------------------------------------------
 # Match start / pause / resume / end
 # ---------------------------------------------------------------------------
@@ -50,7 +49,16 @@ class AnswerSubmitRequest(BaseModel):
     ``response_time_ms`` from its own ``deadline_at`` − ``submitted_at``.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "match_question_id": "781234567890123459",
+                "selected_option_ids": ["781234567890123460"],
+                "client_sent_at": "2026-05-11T09:30:00Z",
+            }
+        },
+    )
 
     match_question_id: int
     selected_option_ids: list[int] = Field(default_factory=list)
@@ -58,6 +66,19 @@ class AnswerSubmitRequest(BaseModel):
 
 
 class AnswerSubmitResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "submission_id": "781234567890123461",
+                "accepted": True,
+                "is_correct": True,
+                "score_awarded": 920,
+                "response_time_ms": 812,
+                "leaderboard_rank": 1,
+            }
+        }
+    )
+
     submission_id: int
     accepted: bool
     is_correct: bool

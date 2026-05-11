@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,9 +26,12 @@ from app.api.deps import (
     optional_current_user,
     require_role,
 )
+from app.cache.rate_limit import acquire as rate_acquire
+from app.core.security import AuthError
 from app.db.models.enums import ModerationStatus, UserRole
 from app.db.models.user import User
 from app.repositories.moderation_repo import ModerationRepo
+from app.schemas.common import ERROR_RESPONSES
 from app.schemas.moderation import (
     DecisionRequest,
     DecisionResponse,
@@ -40,7 +43,7 @@ from app.schemas.moderation import (
 )
 from app.services import moderation_service
 
-router = APIRouter(tags=["moderation"])
+router = APIRouter(tags=["moderation"], responses=ERROR_RESPONSES)
 
 
 # ---------------------------------------------------------------------------
@@ -55,9 +58,31 @@ router = APIRouter(tags=["moderation"])
 )
 async def create_report_endpoint(
     payload: ReportCreate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
     reporter: Annotated[User | None, Depends(optional_current_user)],
 ) -> ReportResponse:
+    actor = (
+        str(reporter.id)
+        if reporter
+        else (request.client.host if request.client else "unknown")
+    )
+    allowed, _remaining, retry_ms = await rate_acquire(
+        redis,
+        request.app.state.rate_limit_sha,
+        f"rate:report:{actor}",
+        capacity=20,
+        refill_per_sec=20 / 3600,
+        cost=1,
+    )
+    if not allowed:
+        raise AuthError(
+            "RATE_LIMITED",
+            429,
+            message="report rate exceeded",
+            details={"retry_after_ms": int(retry_ms)},
+        )
     report = await moderation_service.create_report(
         session,
         reporter_user_id=reporter.id if reporter is not None else None,

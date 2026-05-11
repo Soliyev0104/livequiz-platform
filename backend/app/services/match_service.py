@@ -50,7 +50,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from redis.asyncio import ConnectionPool, Redis
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -60,6 +60,7 @@ from app.cache import leaderboard as lb_cache
 from app.cache.keys import match_current_question
 from app.cache.redis import RoomSnapshotWriter
 from app.core import metrics as app_metrics
+from app.core.config import get_settings
 from app.core.ids import get_id_generator
 from app.core.security import AuthError
 from app.core.telemetry import span as otel_span
@@ -1336,6 +1337,52 @@ async def read_leaderboard(
             for r in rows[:limit]
         ]
         return {"match_id": match_id, "is_final": True, "entries": entries}
+
+    if get_settings().leaderboard_backend == "pg":
+        score_expr = func.coalesce(
+            func.sum(AnswerSubmission.score_awarded), 0
+        ).label("score")
+        avg_rt_expr = func.coalesce(
+            func.avg(AnswerSubmission.response_time_ms), 0
+        ).label("avg_rt")
+        pg_rows = list(
+            (
+                await session.execute(
+                    select(
+                        AnswerSubmission.participant_id,
+                        score_expr,
+                        avg_rt_expr,
+                    )
+                    .where(AnswerSubmission.match_id == match_id)
+                    .group_by(AnswerSubmission.participant_id)
+                    .order_by(desc(score_expr), avg_rt_expr.asc())
+                    .limit(limit)
+                )
+            ).all()
+        )
+        pg_nick_by_id: dict[int, str] = {}
+        if pg_rows:
+            pids = [int(row.participant_id) for row in pg_rows]
+            parts = list(
+                (
+                    await session.execute(
+                        select(RoomParticipant).where(RoomParticipant.id.in_(pids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            pg_nick_by_id = {p.id: p.nickname for p in parts}
+        entries = [
+            {
+                "rank": idx,
+                "participant_id": str(row.participant_id),
+                "nickname": pg_nick_by_id.get(int(row.participant_id), ""),
+                "score": int(row.score),
+            }
+            for idx, row in enumerate(pg_rows, start=1)
+        ]
+        return {"match_id": match_id, "is_final": False, "entries": entries}
 
     redis = await _redis(runtime)
     try:

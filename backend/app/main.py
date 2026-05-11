@@ -45,6 +45,7 @@ from redis.asyncio import ConnectionPool, Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from app.api.v1 import admin as admin_router
 from app.api.v1 import analytics as analytics_router
 from app.api.v1 import auth as auth_router
 from app.api.v1 import matches as matches_router
@@ -186,6 +187,7 @@ def create_app() -> FastAPI:
         title="LiveQuiz API",
         version="0.1.0",
         docs_url="/api/docs",
+        redoc_url="/api/redoc",
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
@@ -266,6 +268,7 @@ def create_app() -> FastAPI:
     app.include_router(analytics_router.router, prefix="/api/v1")
     # P09 moderation surface: POST /reports + GET/POST /moderation/reports/*
     app.include_router(moderation_router.router, prefix="/api/v1")
+    app.include_router(admin_router.router, prefix="/api/v1")
     # WebSocket router lives at the top level (no /api/v1 prefix) per
     # docs/07_websocket_protocol.md and the Nginx /ws/* proxy rule.
     app.include_router(ws_router.router)

@@ -38,6 +38,7 @@ from app.db.models.enums import UserRole
 from app.db.models.quiz_set import QuizSet
 from app.db.models.user import User
 from app.repositories.quiz_repo import QuizRepo
+from app.schemas.common import ERROR_RESPONSES
 from app.schemas.quiz import (
     QuestionCreate,
     QuestionDetail,
@@ -49,7 +50,7 @@ from app.schemas.quiz import (
 )
 from app.services import quiz_service
 
-router = APIRouter(prefix="/quiz-sets", tags=["quiz-sets"])
+router = APIRouter(prefix="/quiz-sets", tags=["quiz-sets"], responses=ERROR_RESPONSES)
 
 _LIST_CACHE_TTL_SECONDS = 60
 

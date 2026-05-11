@@ -16,6 +16,7 @@ Error envelope (per docs/06)::
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -52,7 +53,11 @@ def _envelope(
         },
         "request_id": getattr(request.state, "request_id", None),
     }
-    return JSONResponse(body, status_code=http_status)
+    headers: dict[str, str] | None = None
+    retry_after_ms = (details or {}).get("retry_after_ms")
+    if code == "RATE_LIMITED" and isinstance(retry_after_ms, int | float) and retry_after_ms > 0:
+        headers = {"Retry-After": str(math.ceil(retry_after_ms / 1000))}
+    return JSONResponse(body, status_code=http_status, headers=headers)
 
 
 def register_exception_handlers(app: FastAPI) -> None:

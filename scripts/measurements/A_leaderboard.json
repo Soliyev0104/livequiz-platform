@@ -1,0 +1,23 @@
+{
+  "config": {
+    "players": 2,
+    "questions": 1,
+    "base_url": "http://localhost:8888",
+    "api_prefix": "/api/v1",
+    "leaderboard_backend": "redis"
+  },
+  "metrics": {
+    "join_ms": [
+      18.7965000004624,
+      287.90070000104606
+    ],
+    "answer_ms": [
+      23.25840000048629,
+      40.16199999750825
+    ],
+    "leaderboard_ms": [
+      7.80299999678391,
+      11.74400000309106
+    ]
+  }
+}
