@@ -139,6 +139,32 @@ services:
       - redpandadata:/var/lib/redpanda/data
     expose:
       - "9092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks: [quiznet]
+
+  # One-shot init container — creates the LiveQuiz topics with the
+  # right partition/replica counts the first time the broker comes up,
+  # then exits 0. Compose's `restart: "no"` keeps it from looping.
+  # `make redpanda-topics` is the host-side equivalent.
+  redpanda-init:
+    image: redpandadata/redpanda:v24.2.9
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/ops/create-redpanda-topics.sh"]
+    environment:
+      RPK_MODE: in-container
+      REDPANDA_BROKERS: redpanda:9092
+      REDPANDA_PARTITIONS: "3"
+      REDPANDA_REPLICAS: "1"
+    volumes:
+      - ./ops/scripts/create-redpanda-topics.sh:/ops/create-redpanda-topics.sh:ro
+    restart: "no"
     networks: [quiznet]
 
   clickhouse:
@@ -164,11 +190,13 @@ services:
       SNOWFLAKE_WORKER_ID: 10
       SNOWFLAKE_EPOCH_MS: ${SNOWFLAKE_EPOCH_MS:-1767225600000}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+    expose:
+      - "9100"
     depends_on:
       postgres:
         condition: service_healthy
       redpanda:
-        condition: service_started
+        condition: service_healthy
     networks: [quiznet]
 
   stream-worker:
@@ -185,9 +213,11 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
     depends_on:
       redpanda:
-        condition: service_started
+        condition: service_healthy
       clickhouse:
         condition: service_started
+      redis:
+        condition: service_healthy
     networks: [quiznet]
 
   scheduler:

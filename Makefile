@@ -1,6 +1,6 @@
 # LiveQuiz Makefile. All backend ops run inside the api-a container.
 
-.PHONY: up down logs migrate seed db-reset clickhouse-migrate test lint typecheck load-test redpanda-reset
+.PHONY: up down logs migrate seed db-reset clickhouse-migrate redpanda-topics test lint typecheck load-test redpanda-reset measure-analytics
 
 up:
 	docker compose up -d --build
@@ -26,6 +26,13 @@ db-reset:
 
 clickhouse-migrate:
 	docker compose exec -T clickhouse clickhouse-client --multiquery < migrations/clickhouse/001_events.sql
+	docker compose exec -T clickhouse clickhouse-client --multiquery < migrations/clickhouse/002_analytics_views.sql
+
+redpanda-topics:
+	bash ops/scripts/create-redpanda-topics.sh
+
+measure-analytics:
+	docker compose exec api-a python scripts/measure_analytics.py
 
 test:
 	docker compose exec api-a pytest -q

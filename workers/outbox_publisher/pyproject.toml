@@ -7,6 +7,7 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0,<2.1",
   "asyncpg>=0.30,<0.31",
   "aiokafka>=0.12,<0.13",
+  "prometheus-client>=0.21,<0.22",
   "structlog>=24,<25",
 ]
 

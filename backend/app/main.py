@@ -44,6 +44,7 @@ from redis.asyncio import ConnectionPool, Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from app.api.v1 import analytics as analytics_router
 from app.api.v1 import auth as auth_router
 from app.api.v1 import matches as matches_router
 from app.api.v1 import questions as questions_router
@@ -195,8 +196,31 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             log.warning("readiness: redis check failed: %s", exc)
             result["redis"] = "fail"
-        # ClickHouse — wired in P08
-        result["clickhouse"] = "skipped"
+        # ClickHouse (P08). A failure here downgrades analytics to the
+        # Postgres fallback path; it must NOT mark the API unready.
+        try:
+            import asyncio
+
+            from clickhouse_connect import get_client as _ch_client
+
+            def _ping() -> bool:
+                client = _ch_client(
+                    dsn=settings.clickhouse_url,
+                    database=settings.clickhouse_db,
+                    connect_timeout=1,
+                    send_receive_timeout=2,
+                )
+                try:
+                    rows = client.query("SELECT 1").result_rows
+                    return bool(rows and rows[0][0] == 1)
+                finally:
+                    client.close()
+
+            ch_ok = await asyncio.wait_for(asyncio.to_thread(_ping), timeout=2.5)
+            result["clickhouse"] = "ok" if ch_ok else "degraded"
+        except Exception as exc:  # noqa: BLE001
+            log.info("readiness: clickhouse check degraded: %s", exc)
+            result["clickhouse"] = "degraded"
         return result
 
     app.include_router(auth_router.router, prefix="/api/v1")
@@ -208,6 +232,10 @@ def create_app() -> FastAPI:
     # and the participant-facing answer/leaderboard surface under /matches/...
     app.include_router(matches_router.room_router, prefix="/api/v1")
     app.include_router(matches_router.match_router, prefix="/api/v1")
+    # P08: /matches/{id}/analytics — sits under /matches/ alongside the
+    # P07 match endpoints. Registered as its own router so the
+    # dual-mode (host OR participant) auth dep is local.
+    app.include_router(analytics_router.router, prefix="/api/v1")
     # WebSocket router lives at the top level (no /api/v1 prefix) per
     # docs/07_websocket_protocol.md and the Nginx /ws/* proxy rule.
     app.include_router(ws_router.router)
