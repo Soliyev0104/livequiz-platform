@@ -229,8 +229,11 @@ export const useLiveMatchStore = create<LiveMatchState>((set, get) => ({
 
   setError(p) {
     set((s) => {
-      if (p.code === 'QUESTION_CLOSED' && s.myAnswer?.pending) {
-        return { lastError: p, myAnswer: { ...s.myAnswer, pending: false, tooLate: true } };
+      // Any error that arrives while an answer is in flight means the
+      // submission did not land — stop showing "waiting for the server".
+      if (s.myAnswer?.pending) {
+        const tooLate = p.code === 'QUESTION_CLOSED';
+        return { lastError: p, myAnswer: { ...s.myAnswer, pending: false, tooLate } };
       }
       return { lastError: p };
     });

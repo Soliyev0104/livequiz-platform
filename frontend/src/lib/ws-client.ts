@@ -166,10 +166,15 @@ export class LiveSocket {
     for (const m of pending) this.send(m.type, m.payload);
   }
 
-  /** Send a client message. Returns the generated `message_id`. */
+  /** Send a client message. Returns the generated `message_id`.
+   *
+   * The envelope is exactly `{ type, message_id, payload }` — the backend's
+   * client-message models are strict (`extra="forbid"`), so no top-level
+   * `sent_at`/`room_code`/`match_id`. Client timestamps that matter (e.g. the
+   * answer's `client_sent_at`) belong inside `payload`. */
   send(type: ClientMessageType, payload: unknown): string {
     const messageId = newRequestId();
-    const ok = this.rawSend({ type, payload, message_id: messageId, sent_at: new Date().toISOString() });
+    const ok = this.rawSend({ type, message_id: messageId, payload });
     if (!ok) {
       this.outbuffer.push({ type, payload });
       if (this.outbuffer.length > MAX_BUFFER) this.outbuffer.shift();
