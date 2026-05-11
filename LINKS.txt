@@ -1,9 +1,9 @@
 Deployed URL:
-GitHub repository:
-Team roster:
-  - Name:
-  - Name:
-  - Name:
-
-Demo credentials:
-  See README.md -> Demo credentials.
+GitHub repository: https://github.com/Soliyev0104/livequiz-platform
+Team roster: Avengers
+  - Shoxruxbek Soliyev (U2310250) https://github.com/Soliyev0104 (Leader)
+  - Javoxir Tursunov (U2310212) https://github.com/javohir7410cr7
+  - Ziyodulla Xaydarov (U2310282) https://github.com/khaydarovziyodulla
+  - Abdulxalim Usmonov (U2310272) https://github.com/abdulxalimusmonov
+  - Asadbek Vokhidjonov (U2310278) https://github.com/aroohndale
+  - Ayubkhon Anvarov (U2010034) https://github.com/1maxstar1

@@ -51,10 +51,6 @@ Seed content includes the published quiz `Computer Networks basics` and demo roo
 - Rule-based moderation rather than ML-assisted moderation.
 - WebSocket recovery uses room snapshots and current-question state, not full event replay.
 
-## Recommended repository name
-
-Use `livequiz` or `livequiz-platform`. The docs assume `livequiz-platform` as the root folder.
-
 ## Build order
 
 1. Docker base + Postgres + Redis + Nginx + frontend hello page.
