@@ -73,16 +73,91 @@ SCHEMA_VERSION = 1
 # Logging
 # ---------------------------------------------------------------------------
 
+SERVICE_NAME = os.environ.get("SERVICE_NAME", "outbox-publisher")
+
+
+def _add_otel_context(_logger: Any, _method: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+    """Attach the active span's ``trace_id`` / ``span_id`` when one exists."""
+    try:
+        from opentelemetry import trace
+    except ImportError:  # pragma: no cover
+        return event_dict
+    span = trace.get_current_span()
+    ctx = span.get_span_context() if span is not None else None
+    if ctx is not None and ctx.is_valid:
+        event_dict["trace_id"] = format(ctx.trace_id, "032x")
+        event_dict["span_id"] = format(ctx.span_id, "016x")
+    return event_dict
+
+
+def _add_service(_logger: Any, _method: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+    event_dict.setdefault("service", SERVICE_NAME)
+    return event_dict
+
+
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), stream=sys.stdout)
 structlog.configure(
     processors=[
+        structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
+        _add_service,
+        _add_otel_context,
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        structlog.processors.EventRenamer("message"),
         structlog.processors.JSONRenderer(),
     ],
     wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
 )
 log = structlog.get_logger("outbox-publisher")
+
+
+# ---------------------------------------------------------------------------
+# OpenTelemetry
+# ---------------------------------------------------------------------------
+
+
+def _init_telemetry() -> None:
+    """Best-effort OTLP/gRPC tracing for the publisher (asyncpg + aiokafka).
+
+    A missing OpenTelemetry package is non-fatal — the publisher's job is to
+    drain the outbox, not to produce traces.
+    """
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter,
+        )
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError as exc:  # pragma: no cover
+        log.warning("telemetry.sdk_unavailable", error=str(exc))
+        return
+
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    resource = Resource.create(
+        {
+            "service.name": SERVICE_NAME,
+            "service.version": "0.1.0",
+            "deployment.environment": os.environ.get("APP_ENV", "local"),
+        }
+    )
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=endpoint) if endpoint else OTLPSpanExporter()
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+
+    for name, fn in (
+        ("asyncpg", "opentelemetry.instrumentation.asyncpg:AsyncPGInstrumentor"),
+        ("aiokafka", "opentelemetry.instrumentation.aiokafka:AIOKafkaInstrumentor"),
+    ):
+        try:
+            mod_name, cls_name = fn.split(":")
+            mod = __import__(mod_name, fromlist=[cls_name])
+            getattr(mod, cls_name)().instrument()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("telemetry.instrument_skipped", target=name, error=str(exc))
+    log.info("telemetry.ready", service=SERVICE_NAME, endpoint=endpoint or "(default)")
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +405,9 @@ async def _update_unpublished_gauge(pool: asyncpg.Pool, gauge: Gauge) -> None:
 
 
 async def _run() -> None:
+    # Patch asyncpg/aiokafka before any client is constructed.
+    _init_telemetry()
+
     db_url = _coerce_asyncpg_dsn(os.environ["DATABASE_URL"])
     bootstrap = os.environ.get("REDPANDA_BOOTSTRAP_SERVERS", "redpanda:9092")
 

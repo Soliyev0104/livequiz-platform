@@ -1,5 +1,12 @@
-# Placeholder OTel Collector config — filled in P10.
-# Minimal pass-through so the container starts cleanly during P00.
+# OpenTelemetry Collector — single funnel for app + worker telemetry (P10).
+#
+#   apps/workers --(OTLP/gRPC :4317)--> collector --> Tempo   (traces, OTLP/HTTP)
+#                                                |--> Prometheus (metrics, scraped on :8889)
+#                                                `--> Loki   (logs, push API)
+#
+# Logs from the running containers are primarily shipped by Promtail (it tails
+# the JSON stdout); the `logs` pipeline here is the path for any OTLP-native
+# log records and is kept so the three-signal topology in docs/02 holds.
 
 receivers:
   otlp:
@@ -9,18 +16,42 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
 exporters:
+  # Traces → Tempo's OTLP/HTTP ingest (plaintext, same docker network).
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
+  # Metrics → exposed in Prometheus exposition format on :8889 for Prom to scrape.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    send_timestamps: true
+    metric_expiration: 5m
+    resource_to_telemetry_conversion:
+      enabled: true
+  # Logs → Loki push API.
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
   debug:
     verbosity: basic
 
 service:
+  telemetry:
+    logs:
+      level: warn
   pipelines:
     traces:
       receivers: [otlp]
-      exporters: [debug]
+      processors: [batch]
+      exporters: [otlphttp/tempo]
     metrics:
       receivers: [otlp]
-      exporters: [debug]
+      processors: [batch]
+      exporters: [prometheus]
     logs:
       receivers: [otlp]
-      exporters: [debug]
+      processors: [batch]
+      exporters: [loki]

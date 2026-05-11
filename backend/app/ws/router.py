@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.cache.rate_limit import acquire as rate_acquire
 from app.core.config import get_settings
 from app.core.ids import get_id_generator
+from app.core.metrics import ws_connections_active
 from app.core.security import (
     PARTICIPANT_TYPE,
     AuthError,
@@ -242,6 +243,7 @@ async def ws_room_endpoint(websocket: WebSocket, room_code: str) -> None:
             is_host=is_host,
         )
         await manager.connect(room_code, conn)
+        ws_connections_active.inc()
 
         try:
             # Announce arrival to the room (cross-replica). The host
@@ -281,6 +283,7 @@ async def ws_room_endpoint(websocket: WebSocket, room_code: str) -> None:
                 ):
                     await watchdog
         finally:
+            ws_connections_active.dec()
             await manager.disconnect(room_code, conn)
             try:
                 await manager.broadcast_all(

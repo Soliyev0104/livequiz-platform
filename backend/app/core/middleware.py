@@ -1,16 +1,11 @@
-"""HTTP middleware + global exception handlers.
+"""Global exception handlers — the docs/06 error envelope.
 
-Two responsibilities:
+``register_exception_handlers`` converts ``AuthError`` and Pydantic
+validation failures into the documented envelope; anything else lands on a
+500 with code ``INTERNAL_ERROR``. The per-request ``request_id`` it embeds is
+set by :class:`app.middleware.request_id.RequestIDMiddleware`.
 
-1. ``RequestIDMiddleware`` — every request gets a stable id (header in,
-   header out, ``request.state.request_id`` for handlers). Used by the error
-   envelope below and, in P10, by structured logs and traces.
-
-2. ``register_exception_handlers`` — converts ``AuthError`` and Pydantic
-   validation failures into the docs/06 error envelope. Anything else lands
-   on a 500 with code ``INTERNAL_ERROR``.
-
-Error envelope (per docs/06):
+Error envelope (per docs/06)::
 
     {
       "error": {"code": "...", "message": "...", "details": {...}},
@@ -21,14 +16,11 @@ Error envelope (per docs/06):
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp
 
 from app.core.security import AuthError
 
@@ -44,30 +36,12 @@ _DEFAULT_MESSAGES: dict[str, str] = {
 }
 
 
-def _new_request_id() -> str:
-    return f"req_{uuid.uuid4().hex[:16]}"
-
-
-class RequestIDMiddleware(BaseHTTPMiddleware):
-    """Read or mint ``X-Request-ID`` per request.
-
-    Echoes the same value as a response header so clients can correlate.
-    P10 will plug this into structlog + OTEL spans.
-    """
-
-    def __init__(self, app: ASGIApp) -> None:
-        super().__init__(app)
-
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
-        rid = request.headers.get("x-request-id") or _new_request_id()
-        request.state.request_id = rid
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = rid
-        return response
-
-
 def _envelope(
-    *, code: str, http_status: int, request: Request, message: str | None = None,
+    *,
+    code: str,
+    http_status: int,
+    request: Request,
+    message: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> JSONResponse:
     body = {

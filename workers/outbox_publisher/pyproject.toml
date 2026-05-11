@@ -9,6 +9,11 @@ dependencies = [
   "aiokafka>=0.12,<0.13",
   "prometheus-client>=0.21,<0.22",
   "structlog>=24,<25",
+  "opentelemetry-api>=1.28",
+  "opentelemetry-sdk>=1.28",
+  "opentelemetry-exporter-otlp>=1.28",
+  "opentelemetry-instrumentation-asyncpg>=0.49b0",
+  "opentelemetry-instrumentation-aiokafka>=0.49b0",
 ]
 
 [tool.setuptools.packages.find]

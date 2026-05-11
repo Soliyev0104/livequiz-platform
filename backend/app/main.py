@@ -40,6 +40,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 from redis.asyncio import ConnectionPool, Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -55,9 +56,19 @@ from app.api.v1 import users as users_router
 from app.cache import leaderboard as lb_cache
 from app.cache.rate_limit import load_script as load_rate_limit_script
 from app.cache.redis import load_capacity_scripts
+from app.core import metrics as _metrics  # noqa: F401 — registers /metrics collectors at import
 from app.core.config import get_settings
 from app.core.ids import get_id_generator
-from app.core.middleware import RequestIDMiddleware, register_exception_handlers
+from app.core.logging import configure_logging
+from app.core.middleware import register_exception_handlers
+from app.core.telemetry import (
+    init_tracing,
+    instrument_asyncpg,
+    instrument_fastapi,
+    instrument_redis,
+    instrument_sqlalchemy,
+)
+from app.middleware.request_id import RequestIDMiddleware
 from app.services import match_service
 from app.ws import router as ws_router
 from app.ws.connection_manager import ConnectionManager
@@ -77,6 +88,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         max_overflow=5,
         future=True,
     )
+    # SQLAlchemy traces hook the sync Engine underneath the async one, so it
+    # has to happen after the engine exists (the rest of the OTel wiring is
+    # global and runs in create_app()).
+    instrument_sqlalchemy(engine)
     redis_pool = ConnectionPool.from_url(settings.redis_url, decode_responses=True)
     app.state.settings = settings
     app.state.engine = engine
@@ -155,6 +170,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+
+    # Logging + tracing must be configured before the app object exists so
+    # that even import-time / startup log lines land as JSON and any early
+    # spans use the right resource attributes.
+    configure_logging(settings.log_level, service=settings.service_name)
+    init_tracing(
+        service_name=settings.service_name,
+        service_version="0.1.0",
+        environment=settings.app_env,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+
     app = FastAPI(
         title="LiveQuiz API",
         version="0.1.0",
@@ -242,6 +269,29 @@ def create_app() -> FastAPI:
     # WebSocket router lives at the top level (no /api/v1 prefix) per
     # docs/07_websocket_protocol.md and the Nginx /ws/* proxy rule.
     app.include_router(ws_router.router)
+
+    # Prometheus: default HTTP histograms/counters + the custom collectors in
+    # app.core.metrics, served at GET /metrics (internal :8000 only — Nginx
+    # never proxies it; Prometheus scrapes api-a:8000/metrics directly).
+    instrumentator = Instrumentator(
+        should_group_status_codes=True,
+        excluded_handlers=["/metrics", "/api/v1/health", "/api/v1/ready"],
+    )
+    try:
+        instrumentator.instrument(app)
+    except ValueError:
+        # Re-registering the default collectors fails when create_app() runs
+        # more than once in a process (test suites). The first app's
+        # collectors are still global, so /metrics keeps working.
+        pass
+    instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
+
+    # OpenTelemetry: instrument the app LAST so the server span produced by
+    # the ASGI instrumentation wraps every middleware added above — that is
+    # what lets RequestIDMiddleware stamp ``request_id`` onto the live span.
+    instrument_fastapi(app)
+    instrument_redis()
+    instrument_asyncpg()
     return app
 
 

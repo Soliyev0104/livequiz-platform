@@ -1,6 +1,7 @@
-# Placeholder Tempo config — filled in P10.
+# Tempo — single-binary, local filesystem backend, 24h trace retention (P10).
 server:
   http_listen_port: 3200
+  log_level: warn
 
 distributor:
   receivers:
@@ -11,6 +12,17 @@ distributor:
         http:
           endpoint: 0.0.0.0:4318
 
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 24h          # drop trace blocks older than a day
+    compacted_block_retention: 1h
+
+querier:
+  max_concurrent_queries: 20
+
 storage:
   trace:
     backend: local
@@ -18,3 +30,6 @@ storage:
       path: /var/tempo/blocks
     wal:
       path: /var/tempo/wal
+
+usage_report:
+  reporting_enabled: false

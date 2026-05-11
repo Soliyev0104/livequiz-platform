@@ -30,6 +30,9 @@ dependencies = [
   "opentelemetry-instrumentation-fastapi>=0.49b0",
   "opentelemetry-instrumentation-sqlalchemy>=0.49b0",
   "opentelemetry-instrumentation-redis>=0.49b0",
+  "opentelemetry-instrumentation-asyncpg>=0.49b0",
+  "opentelemetry-instrumentation-aiokafka>=0.49b0",
+  "prometheus-client>=0.21,<0.22",
 ]
 
 [project.optional-dependencies]

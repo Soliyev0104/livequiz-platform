@@ -19,6 +19,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ids import get_id_generator
+from app.core.telemetry import span as otel_span
 from app.db.models.outbox_event import OutboxEvent
 from app.events.envelope import utcnow
 
@@ -48,6 +49,9 @@ async def register_event(
         payload=payload,
         occurred_at=occurred_at or utcnow(),
     )
-    session.add(row)
-    await session.flush()
+    with otel_span(
+        "outbox.insert", **{"event.type": event_type, "aggregate.type": aggregate_type}
+    ):
+        session.add(row)
+        await session.flush()
     return row

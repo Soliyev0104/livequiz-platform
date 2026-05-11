@@ -24,12 +24,21 @@ services:
   frontend:
     build:
       context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE: /api/v1
+        NEXT_PUBLIC_WS_BASE: /ws
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_BASE: /api/v1
       NEXT_PUBLIC_WS_BASE: /ws
+      # Server-side base used by the Next.js auth BFF route handlers to reach
+      # the API through nginx (load-balanced over api-a/api-b).
+      INTERNAL_API_BASE: http://nginx/api/v1
     expose:
       - "3000"
+    depends_on:
+      - api-a
+      - api-b
     networks: [quiznet]
 
   api-a: &api
@@ -192,6 +201,7 @@ services:
       REDPANDA_BOOTSTRAP_SERVERS: ${REDPANDA_BOOTSTRAP_SERVERS:-redpanda:9092}
       SNOWFLAKE_WORKER_ID: 10
       SNOWFLAKE_EPOCH_MS: ${SNOWFLAKE_EPOCH_MS:-1767225600000}
+      APP_ENV: ${APP_ENV:-local}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
     expose:
       - "9100"
@@ -213,7 +223,10 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       SNOWFLAKE_WORKER_ID: 20
       SNOWFLAKE_EPOCH_MS: ${SNOWFLAKE_EPOCH_MS:-1767225600000}
+      APP_ENV: ${APP_ENV:-local}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+    expose:
+      - "9101"
     depends_on:
       redpanda:
         condition: service_healthy
@@ -240,23 +253,33 @@ services:
         condition: service_healthy
     networks: [quiznet]
 
+  # --- Observability stack (P10) ---------------------------------------
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.112.0
     command: ["--config=/etc/otel-collector.yaml"]
     volumes:
       - ./ops/observability/otel-collector.yaml:/etc/otel-collector.yaml:ro
     expose:
-      - "4317"
-      - "4318"
+      - "4317"   # OTLP gRPC
+      - "4318"   # OTLP HTTP
+      - "8889"   # Prometheus exporter (scraped by prometheus)
+    depends_on:
+      - tempo
+      - loki
     networks: [quiznet]
 
   prometheus:
     image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
     volumes:
       - ./ops/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheusdata:/prometheus
-    expose:
-      - "9090"
+    ports:
+      - "9090:9090"
     networks: [quiznet]
 
   loki:
@@ -265,8 +288,19 @@ services:
     volumes:
       - ./ops/observability/loki.yml:/etc/loki/local-config.yaml:ro
       - lokidata:/loki
-    expose:
-      - "3100"
+    ports:
+      - "3100:3100"
+    networks: [quiznet]
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./ops/observability/promtail.yml:/etc/promtail/config.yml:ro
+      # Promtail discovers containers and reads their logs over the Docker API.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
     networks: [quiznet]
 
   tempo:
@@ -275,21 +309,51 @@ services:
     volumes:
       - ./ops/observability/tempo.yml:/etc/tempo.yaml:ro
       - tempodata:/var/tempo
+    ports:
+      - "3200:3200"
+    networks: [quiznet]
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.66.0
+    environment:
+      REDIS_ADDR: redis://redis:6379
     expose:
-      - "3200"
+      - "9121"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [quiznet]
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+    environment:
+      DATA_SOURCE_NAME: "postgresql://livequiz:livequiz@postgres:5432/livequiz?sslmode=disable"
+    expose:
+      - "9187"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks: [quiznet]
 
   grafana:
     image: grafana/grafana:11.3.0
     environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_LOG_LEVEL: warn
+      GF_USERS_DEFAULT_THEME: dark
     volumes:
-      - ./ops/observability/grafana:/etc/grafana/provisioning:ro
+      - ./ops/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
-    expose:
-      - "3000"
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
     networks: [quiznet]
 
 volumes:

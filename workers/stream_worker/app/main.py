@@ -33,11 +33,13 @@ import logging
 import os
 import signal
 import sys
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.structs import ConsumerRecord
+from prometheus_client import Counter, Gauge, start_http_server
 from pydantic import ValidationError
 from redis.asyncio import Redis
 
@@ -62,16 +64,109 @@ TOPICS = [
     "livequiz.events.moderation",
 ]
 
+SERVICE_NAME = os.environ.get("SERVICE_NAME", "stream-worker")
+METRICS_PORT = 9101
+
+
+def _add_otel_context(_logger: Any, _method: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from opentelemetry import trace
+    except ImportError:  # pragma: no cover
+        return event_dict
+    span = trace.get_current_span()
+    ctx = span.get_span_context() if span is not None else None
+    if ctx is not None and ctx.is_valid:
+        event_dict["trace_id"] = format(ctx.trace_id, "032x")
+        event_dict["span_id"] = format(ctx.span_id, "016x")
+    return event_dict
+
+
+def _add_service(_logger: Any, _method: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+    event_dict.setdefault("service", SERVICE_NAME)
+    return event_dict
+
+
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), stream=sys.stdout)
 structlog.configure(
     processors=[
+        structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
+        _add_service,
+        _add_otel_context,
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        structlog.processors.EventRenamer("message"),
         structlog.processors.JSONRenderer(),
     ],
     wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
 )
 log = structlog.get_logger("stream-worker")
+
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics (served on :9101/metrics)
+# ---------------------------------------------------------------------------
+
+EVENTS_PROCESSED = Counter(
+    "stream_worker_events_processed_total",
+    "Domain events successfully written to ClickHouse, by event type.",
+    ["event_type"],
+)
+EVENT_LAG = Gauge(
+    "stream_worker_event_lag_seconds",
+    "Seconds between an event's occurred_at and when this worker handled it.",
+    ["topic"],
+)
+
+
+def _event_lag_seconds(occurred_at: datetime) -> float:
+    if occurred_at.tzinfo is None:
+        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - occurred_at).total_seconds())
+
+
+# ---------------------------------------------------------------------------
+# OpenTelemetry
+# ---------------------------------------------------------------------------
+
+
+def _init_telemetry() -> None:
+    """Best-effort OTLP/gRPC tracing (aiokafka consumer spans + Redis spans)."""
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter,
+        )
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError as exc:  # pragma: no cover
+        log.warning("telemetry.sdk_unavailable", error=str(exc))
+        return
+
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    resource = Resource.create(
+        {
+            "service.name": SERVICE_NAME,
+            "service.version": "0.1.0",
+            "deployment.environment": os.environ.get("APP_ENV", "local"),
+        }
+    )
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=endpoint) if endpoint else OTLPSpanExporter()
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+
+    for name, dotted in (
+        ("aiokafka", "opentelemetry.instrumentation.aiokafka:AIOKafkaInstrumentor"),
+        ("redis", "opentelemetry.instrumentation.redis:RedisInstrumentor"),
+    ):
+        try:
+            mod_name, cls_name = dotted.split(":")
+            mod = __import__(mod_name, fromlist=[cls_name])
+            getattr(mod, cls_name)().instrument()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("telemetry.instrument_skipped", target=name, error=str(exc))
+    log.info("telemetry.ready", service=SERVICE_NAME, endpoint=endpoint or "(default)")
 
 
 ROOM_EVENT_TYPES = {"RoomCreated", "PlayerJoined", "PlayerLeft"}
@@ -139,6 +234,8 @@ async def _handle_message(
         # malformed bytes would only repeat the error forever.
         return True
 
+    EVENT_LAG.labels(topic=msg.topic).set(_event_lag_seconds(env.occurred_at))
+
     if env.schema_version != CURRENT_SCHEMA_VERSION:
         log.error(
             "stream.schema_version_mismatch",
@@ -172,6 +269,7 @@ async def _handle_message(
             error=str(exc),
         )
         return False
+    EVENTS_PROCESSED.labels(event_type=env.event_type).inc()
     return True
 
 
@@ -181,6 +279,14 @@ async def _handle_message(
 
 
 async def _run() -> None:
+    # Patch aiokafka/redis before any client is constructed.
+    _init_telemetry()
+    try:
+        start_http_server(METRICS_PORT)
+        log.info("stream.metrics_listening", port=METRICS_PORT)
+    except OSError as exc:  # noqa: BLE001 — metrics port clash must not kill ingest
+        log.error("stream.metrics_bind_failed", port=METRICS_PORT, error=str(exc))
+
     bootstrap = os.environ.get("REDPANDA_BOOTSTRAP_SERVERS", "redpanda:9092")
     ch_url = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123")
     ch_db = os.environ.get("CLICKHOUSE_DB", "livequiz")

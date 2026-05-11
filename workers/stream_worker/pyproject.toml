@@ -9,6 +9,12 @@ dependencies = [
   "redis[hiredis]>=5.2,<5.3",
   "pydantic>=2.9,<2.10",
   "structlog>=24,<25",
+  "prometheus-client>=0.21,<0.22",
+  "opentelemetry-api>=1.28",
+  "opentelemetry-sdk>=1.28",
+  "opentelemetry-exporter-otlp>=1.28",
+  "opentelemetry-instrumentation-aiokafka>=0.49b0",
+  "opentelemetry-instrumentation-redis>=0.49b0",
 ]
 
 [tool.setuptools.packages.find]

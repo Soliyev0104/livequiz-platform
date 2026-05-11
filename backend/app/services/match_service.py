@@ -59,8 +59,10 @@ from app.cache import idempotency as idem_cache
 from app.cache import leaderboard as lb_cache
 from app.cache.keys import match_current_question
 from app.cache.redis import RoomSnapshotWriter
+from app.core import metrics as app_metrics
 from app.core.ids import get_id_generator
 from app.core.security import AuthError
+from app.core.telemetry import span as otel_span
 from app.db.models.answer_option import AnswerOption
 from app.db.models.answer_submission import AnswerSubmission
 from app.db.models.enums import RoomStatus
@@ -1230,44 +1232,52 @@ async def submit_answer(
             await idem_cache.set(redis, request_id, cached_form)
             return idem_response
 
-        # 9. Post-commit hooks (best-effort)
-        await lb_cache.zadd_total(
-            redis,
-            match_id,
-            participant_id,
-            int(score_awarded),
-            sha=runtime.leaderboard_sha,
-        )
-        if question_id is not None:
-            await lb_cache.mark_answered(
-                redis, match_id, question_id, participant_id
-            )
-        await lb_cache.set_nicknames(
-            redis, match_id, [(participant_id, participant_nick)]
-        )
-
-        # Compute leaderboard rank for this participant
+        # 9. Post-commit hooks (best-effort). Wrapped in a single
+        #    ``leaderboard.update`` span so the ZADD + read + broadcast show
+        #    up as one subtree under the HTTP request span (the child Redis
+        #    command spans nest underneath it).
         rank: int | None = None
-        top10 = await lb_cache.top(redis, match_id, n=10)
-        for entry in top10:
-            if str(entry["participant_id"]) == str(participant_id):
-                rank = int(entry["rank"])
-                break
-
-        version = int(await redis.incr(f"match:{match_id}:lb_version") or 0)
-        if room_code is not None:
-            await _broadcast(
-                runtime,
-                room_code,
-                {
-                    "type": "leaderboard.updated",
-                    "message_id": await _next_message_id(),
-                    "payload": {
-                        "version": version,
-                        "top": top10,
-                    },
-                },
+        with otel_span("leaderboard.update", **{"match.id": str(match_id)}):
+            await lb_cache.zadd_total(
+                redis,
+                match_id,
+                participant_id,
+                int(score_awarded),
+                sha=runtime.leaderboard_sha,
             )
+            if question_id is not None:
+                await lb_cache.mark_answered(
+                    redis, match_id, question_id, participant_id
+                )
+            await lb_cache.set_nicknames(
+                redis, match_id, [(participant_id, participant_nick)]
+            )
+
+            # Compute leaderboard rank for this participant
+            top10 = await lb_cache.top(redis, match_id, n=10)
+            for entry in top10:
+                if str(entry["participant_id"]) == str(participant_id):
+                    rank = int(entry["rank"])
+                    break
+
+            version = int(await redis.incr(f"match:{match_id}:lb_version") or 0)
+            if room_code is not None:
+                await _broadcast(
+                    runtime,
+                    room_code,
+                    {
+                        "type": "leaderboard.updated",
+                        "message_id": await _next_message_id(),
+                        "payload": {
+                            "version": version,
+                            "top": top10,
+                        },
+                    },
+                )
+
+        app_metrics.record_answer_submission(
+            is_correct=is_correct, response_time_ms=response_time_ms
+        )
 
         response = {
             "submission_id": submission_id,

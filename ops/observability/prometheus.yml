@@ -1,9 +1,42 @@
-# Placeholder Prometheus config — filled in P10.
+# Prometheus scrape config (P10). 5s interval — this is a single-host dev
+# stack, so fast scraping is cheap and makes the Grafana panels lively.
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  external_labels:
+    stack: livequiz-local
 
 scrape_configs:
+  # FastAPI replicas — prometheus_fastapi_instrumentator on /metrics.
+  - job_name: api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['api-a:8000', 'api-b:8000']
+
+  # Outbox publisher — outbox_unpublished_total on :9100.
+  - job_name: outbox-publisher
+    static_configs:
+      - targets: ['outbox-publisher:9100']
+
+  # Stream worker — stream_worker_events_processed_total / _event_lag_seconds on :9101.
+  - job_name: stream-worker
+    static_configs:
+      - targets: ['stream-worker:9101']
+
+  # OTel Collector's own Prometheus exporter (re-exports app/worker OTLP metrics).
+  - job_name: otel-collector
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  # Infra exporters powering the Redis / Postgres dashboard panels.
+  - job_name: redis-exporter
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+  - job_name: postgres-exporter
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
   - job_name: prometheus
     static_configs:
       - targets: ['localhost:9090']
