@@ -2,27 +2,49 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 # Notes:
 #   * No source mounts; images must be self-contained.
-#   * Nginx swaps to prod.conf (security headers + HSTS + TLS placeholder).
-#   * Only nginx publishes ports.
-#   * GRAFANA_ADMIN_PASSWORD must be set in .env (no default).
+#   * Nginx swaps to an env-selected production config.
+#   * Only nginx publishes ports; observability ports are reset to internal-only.
+#   * Production secrets must be set in .env (no insecure defaults).
 
 services:
   nginx:
     restart: always
+    ports:
+      - "${NGINX_PORT:-80}:80"
     volumes:
-      - ./ops/nginx/prod.conf:/etc/nginx/nginx.conf:ro
+      - ./ops/nginx/${NGINX_CONF:-prod.conf}:/etc/nginx/nginx.conf:ro
 
   frontend:
     restart: always
 
   api-a:
     restart: always
+    environment:
+      APP_ENV: prod
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set in prod}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in prod}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:?CLICKHOUSE_URL must be set in prod}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:?CLICKHOUSE_DB must be set in prod}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in prod}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set in prod}
 
   api-b:
     restart: always
+    environment:
+      APP_ENV: prod
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set in prod}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in prod}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:?CLICKHOUSE_URL must be set in prod}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:?CLICKHOUSE_DB must be set in prod}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in prod}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set in prod}
 
   postgres:
     restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in prod}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in prod}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set in prod}
 
   redis:
     restart: always
@@ -32,30 +54,61 @@ services:
 
   clickhouse:
     restart: always
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:?CLICKHOUSE_DB must be set in prod}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?CLICKHOUSE_USER must be set in prod}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set in prod}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
 
   outbox-publisher:
     restart: always
+    environment:
+      APP_ENV: prod
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in prod}
 
   stream-worker:
     restart: always
+    environment:
+      APP_ENV: prod
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:?CLICKHOUSE_URL must be set in prod}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:?CLICKHOUSE_DB must be set in prod}
 
   scheduler:
     restart: always
+    environment:
+      APP_ENV: prod
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in prod}
 
   otel-collector:
     restart: always
 
   prometheus:
     restart: always
+    ports: !reset []
 
   loki:
+    restart: always
+    ports: !reset []
+
+  promtail:
     restart: always
 
   tempo:
     restart: always
+    ports: !reset []
+
+  redis-exporter:
+    restart: always
+
+  postgres-exporter:
+    restart: always
+    environment:
+      DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DATA_SOURCE_NAME:?POSTGRES_EXPORTER_DATA_SOURCE_NAME must be set in prod}
 
   grafana:
     restart: always
+    ports: !reset []
     environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set in prod}
       GF_AUTH_ANONYMOUS_ENABLED: "false"

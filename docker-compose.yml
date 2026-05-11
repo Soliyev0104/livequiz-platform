@@ -106,15 +106,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: livequiz
-      POSTGRES_PASSWORD: livequiz
-      POSTGRES_DB: livequiz
+      POSTGRES_USER: ${POSTGRES_USER:-livequiz}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-livequiz}
+      POSTGRES_DB: ${POSTGRES_DB:-livequiz}
     volumes:
       - pgdata:/var/lib/postgresql/data
     expose:
       - "5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U livequiz -d livequiz"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -183,6 +183,8 @@ services:
     image: clickhouse/clickhouse-server:24.8
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-livequiz}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
       - clickhousedata:/var/lib/clickhouse
@@ -327,7 +329,7 @@ services:
   postgres-exporter:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
     environment:
-      DATA_SOURCE_NAME: "postgresql://livequiz:livequiz@postgres:5432/livequiz?sslmode=disable"
+      DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DATA_SOURCE_NAME:-postgresql://livequiz:livequiz@postgres:5432/livequiz?sslmode=disable}
     expose:
       - "9187"
     depends_on:

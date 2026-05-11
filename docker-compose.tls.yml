@@ -1,0 +1,11 @@
+# TLS override for domain-backed production deployments.
+# Apply after docker-compose.prod.yml:
+#   NGINX_CONF=prod.tls.conf docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.tls.yml up -d
+
+services:
+  nginx:
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ${NGINX_CERTS_DIR:?NGINX_CERTS_DIR must point to the host cert directory}:/etc/nginx/certs:ro
