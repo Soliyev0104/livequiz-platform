@@ -4,21 +4,25 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
+from app.schemas._email import LooseEmailStr
 from app.schemas.user import UserPublic
 
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: LooseEmailStr = Field(max_length=254)
     password: str = Field(min_length=8, max_length=128)
     display_name: str = Field(min_length=1, max_length=80)
 
 
 # Login does NOT enforce min_length=8 — the seeded demo users use shorter
-# passwords (host, admin, player) and must be able to authenticate.
+# passwords (host, admin, player) and must be able to authenticate. ``email``
+# uses LooseEmailStr (not pydantic's EmailStr): the seeded accounts live on the
+# reserved ``.local`` TLD, which email-validator rejects; and login matches
+# against stored credentials, so RFC-strict validation is unnecessary here.
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: LooseEmailStr = Field(max_length=254)
     password: str = Field(min_length=1, max_length=256)
 
 

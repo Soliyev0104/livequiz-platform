@@ -7,16 +7,20 @@ truncates them.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, EmailStr, field_serializer
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 from app.db.models.enums import UserRole
+from app.schemas._email import LooseEmailStr
 
 
 class UserPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    email: EmailStr
+    # LooseEmailStr (not EmailStr): seeded demo accounts use the reserved
+    # ``.local`` TLD, and this is a response model — the value comes straight
+    # from the database and must serialise without re-running RFC validation.
+    email: LooseEmailStr
     display_name: str
     role: UserRole
 
