@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /dashboard
+Disallow: /moderation
+Disallow: /host
+Disallow: /matches

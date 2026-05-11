@@ -6,12 +6,20 @@
 
 FROM node:22-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
+# .npmrc carries `legacy-peer-deps=true` — next@15.0.x's peer range predates
+# React 19 stable, so npm needs that flag to install/ci cleanly.
+COPY package.json package-lock.json* .npmrc* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
 
 FROM node:22-alpine AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# NEXT_PUBLIC_* are inlined at build time; the app code also defaults to
+# these values so a plain `next build` (no Docker) still works.
+ARG NEXT_PUBLIC_API_BASE=/api/v1
+ARG NEXT_PUBLIC_WS_BASE=/ws
+ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE \
+    NEXT_PUBLIC_WS_BASE=$NEXT_PUBLIC_WS_BASE
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
