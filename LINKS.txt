@@ -1,4 +1,4 @@
-Deployed URL:
+Deployed URL: http://207.154.245.178
 GitHub repository: https://github.com/Soliyev0104/livequiz-platform
 Team roster: Avengers
   - Shoxruxbek Soliyev (U2310250) https://github.com/Soliyev0104 (Leader)
